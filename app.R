@@ -277,7 +277,8 @@ ui <- page_navbar(
       plotOutput("timeline_plot", height = "550px")
     ),
     card(card_header("Souhrnná kumulativní vzcházivost varianty (průměr přes časy, orientační)"),
-         p(class = "text-muted small", "Jedna hodnota na variantu. Jde o marginální modelový odhad zprůměrovaný přes data měření."),
+         p(class = "text-muted small", "Jedna hodnota na variantu — průměr modelových odhadů přes data měření. ",
+           "Sloupec n_times = přes kolik časů se průměrovalo."),
          DTOutput("cum_emm_results")),
     card(card_header("Statistické skupiny po jednotlivých datech (CLD, orientační)"),
          DTOutput("cum_cld_results")),
@@ -303,7 +304,8 @@ ui <- page_navbar(
       plotOutput("main_plot", height = "600px")
     ),
     card(card_header("Souhrnný odhad varianty — podmíněný model (průměr přes časy)"),
-         p(class = "text-muted small", "Jedna hodnota na variantu. Jde o marginální modelový odhad zprůměrovaný přes data měření."),
+         p(class = "text-muted small", "Jedna hodnota na variantu — průměr modelových odhadů přes data měření. ",
+           "Sloupec n_times = přes kolik časů se průměrovalo (saturované varianty mohou mít méně)."),
          DTOutput("emm_results")),
     card(card_header("Statistické skupiny po jednotlivých datech (CLD) — podmíněný model"),
          DTOutput("cld_results")),
@@ -810,13 +812,32 @@ server <- function(input, output, session) {
 
       add_log("\u2713 Temporal analysis complete")
 
-      # ── Marginální emmeans (průměr přes časy) pro podmíněný model ──
+      # ── Marginální odhad (průměr přes časy) pro podmíněný model ──
+      # Počítáme ručně z per-timepoint emmeans, ne přes emmeans(~ treatment),
+      # protože saturované varianty (remaining=0) nemají data v některých časech
+      # a emmeans by je vynechalo nebo vrátilo NA.
       tryCatch({
-        emm_marg <- emmeans(mod, ~ treatment, type = "response", level = conf_level)
-        rv$emm_marginal <- as.data.frame(emm_marg)
-        add_log("\u2713 Marginální emmeans (podmíněný model) computed")
+        df_emm <- rv$emm_plot  # per treatment (× time)
+        if ("time" %in% names(df_emm)) {
+          # M3: průměr prob přes časy kde varianta má odhad
+          rv$emm_marginal <- df_emm %>%
+            filter(!is.na(prob)) %>%
+            group_by(treatment) %>%
+            summarise(
+              prob = mean(prob),
+              SE = sqrt(mean(SE^2)),  # aproximace: RMS chyb
+              asymp.LCL = mean(asymp.LCL),
+              asymp.UCL = mean(asymp.UCL),
+              n_times = n(),
+              .groups = "drop"
+            )
+        } else {
+          # M2: emmeans vrací přímo per treatment, žádná marginalizace není potřeba
+          rv$emm_marginal <- df_emm
+        }
+        add_log("\u2713 Marginální odhad (podmíněný model) computed")
       }, error = function(e) {
-        add_log("\u26A0 Marginální emmeans selhaly: ", conditionMessage(e))
+        add_log("\u26A0 Marginální odhad selhal: ", conditionMessage(e))
         rv$emm_marginal <- NULL
       })
 
@@ -898,13 +919,25 @@ server <- function(input, output, session) {
           rv$cum_cld <- NULL
         })
 
-        # Marginální emmeans (průměr přes časy) pro kumulativní model
+        # Marginální odhad (průměr přes časy) pro kumulativní model
+        # Kumulativní model má vždy data pro všechny treatment×time (full_data se nefiltruje),
+        # ale pro konzistenci počítáme stejným způsobem jako u podmíněného modelu.
         tryCatch({
-          cum_emm_marg <- emmeans(rv$cum_model, ~ treatment, type = "response", level = conf_level)
-          rv$cum_emm_marginal <- as.data.frame(cum_emm_marg)
-          add_log("\u2713 Marginální emmeans (kumulativní model) computed")
+          df_cum <- rv$cum_emm  # per treatment × time
+          rv$cum_emm_marginal <- df_cum %>%
+            filter(!is.na(prob)) %>%
+            group_by(treatment) %>%
+            summarise(
+              prob = mean(prob),
+              SE = sqrt(mean(SE^2)),
+              asymp.LCL = mean(asymp.LCL),
+              asymp.UCL = mean(asymp.UCL),
+              n_times = n(),
+              .groups = "drop"
+            )
+          add_log("\u2713 Marginální odhad (kumulativní model) computed")
         }, error = function(e) {
-          add_log("\u26A0 Kumulativní marginální emmeans selhaly: ", conditionMessage(e))
+          add_log("\u26A0 Kumulativní marginální odhad selhal: ", conditionMessage(e))
           rv$cum_emm_marginal <- NULL
         })
       }, error = function(e) {
