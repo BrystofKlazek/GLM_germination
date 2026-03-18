@@ -110,7 +110,7 @@ ui <- page_navbar(
           col_widths = c(6, 6),
           card_body(
             actionButton("transform_btn", "Transformace z dlouhého na širokého",
-                         class = "btn-success btn-lg"),
+                         class = "btn-primary btn-lg"),
             uiOutput("transform_status")
           ),
           uiOutput("transform_summary")
@@ -140,7 +140,7 @@ ui <- page_navbar(
           col_widths = c(6, 6),
           card_body(
             actionButton("convert_btn", "Převod na kondicionální přírůstky",
-                         class = "btn-success btn-lg"),
+                         class = "btn-info btn-lg"),
             uiOutput("convert_status")
           ),
           uiOutput("conversion_summary")
@@ -173,6 +173,9 @@ ui <- page_navbar(
     card(card_header("AIC / BIC porovnání"),
          uiOutput("aic_bic_note"),
          DTOutput("aic_bic_table")),
+    card(card_header("Predikované průměry (emmeans)"),
+         uiOutput("emm_info"),
+         DTOutput("emm_table")),
     card(card_header("Párová porovnání variant (post-hoc)"),
          uiOutput("posthoc_info"),
          DTOutput("posthoc_table")),
@@ -965,6 +968,23 @@ server <- function(input, output, session) {
   # ════════════════════════════════════════════════════════════
   # TAB 5: Post-hoc
   # ════════════════════════════════════════════════════════════
+
+  output$emm_info <- renderUI({
+    req(rv$best_model)
+    txt <- if (rv$best_model == "M3")
+      "Odhady podmíněné pravděpodobnosti klíčení pro každou variantu v každém datu (model s interakcí)."
+    else
+      "Odhady podmíněné pravděpodobnosti klíčení pro každou variantu (průměr přes data, model bez interakce)."
+    div(class = "alert alert-light",
+        tags$small(txt))
+  })
+
+  output$emm_table <- renderDT({
+    req(rv$emm_plot)
+    df <- rv$emm_plot; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
 
   output$posthoc_info <- renderUI({
     req(rv$best_model)
