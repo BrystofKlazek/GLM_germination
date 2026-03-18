@@ -73,7 +73,12 @@ ui <- page_navbar(
       p(class = "text-muted small",
         "Kvazibinomický model zohledňuje overdisperzi (variabilitu navíc) ",
         "a je konzervativnější. Binomický předpokládá, že veškerá variabilita ",
-        "je čistě binomická — vhodný pouze pokud je disperze blízká 1.")
+        "je čistě binomická — vhodný pouze pokud je disperze blízká 1."),
+      checkboxInput("drop_zero_times", "Vyřadit data, kde nic nevyklíčilo", value = TRUE),
+      p(class = "text-muted small",
+        "Vyřadí časové body, ve kterých mají všechny nádoby kumulativní počet = 0. ",
+        "Tyto body nepřináší informaci o rozdílech mezi variantami a mohou ",
+        "způsobit numerickou nestabilitu modelu (extrémní intervaly spolehlivosti).")
     )
   ),
 
@@ -565,6 +570,29 @@ server <- function(input, output, session) {
 
       long <- long %>%
         mutate(new_germ = pmax(0, new_germ))
+
+      # Vyřadit časové body kde u VŠECH nádob kumulativní počet = 0
+      if (isTRUE(input$drop_zero_times)) {
+        zero_times <- long %>%
+          group_by(time) %>%
+          summarise(all_zero = all(cumulative == 0), .groups = "drop") %>%
+          filter(all_zero) %>%
+          pull(time)
+        if (length(zero_times) > 0) {
+          long <- long %>% filter(!time %in% zero_times)
+          # Přepočítat cum_prev po vyřazení — první zbývající timepoint musí mít cum_prev = 0
+          long <- long %>%
+            mutate(time = droplevels(time)) %>%
+            arrange(treatment, pot_id, time) %>%
+            group_by(treatment, pot_id) %>%
+            mutate(cum_prev = lag(cumulative, default = 0),
+                   new_germ = pmax(0, cumulative - cum_prev),
+                   remaining = N - cum_prev) %>%
+            ungroup()
+          add_log("\u2713 Vyřazeno ", length(zero_times), " časových bodů s nulovým klíčením: ",
+                  paste(zero_times, collapse = ", "))
+        }
+      }
 
       # Uložit kompletní data PŘED filtrací (pro kumulativní grafy)
       rv$full_data <- long
