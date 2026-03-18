@@ -249,10 +249,8 @@ ui <- page_navbar(
       ),
       plotOutput("final_bar_plot", height = "550px")
     ),
-    card(card_header("Predikované průměry (emmeans) — jednoduchý test"),
+    card(card_header("Predikované průměry a statistické skupiny (emmeans + CLD) — jednoduchý test"),
          DTOutput("final_emm_results")),
-    card(card_header("CLD — jednoduchý test (poslední datum)"),
-         DTOutput("final_cld_results")),
     card(card_header("Párová porovnání — jednoduchý test"),
          DTOutput("final_posthoc_results")),
 
@@ -273,9 +271,10 @@ ui <- page_navbar(
       ),
       plotOutput("timeline_plot", height = "550px")
     ),
-    card(card_header("Predikované průměry (emmeans) — kumulativní model (orientační)"),
+    card(card_header("Souhrnná kumulativní vzcházivost varianty (průměr přes časy, orientační)"),
+         p(class = "text-muted small", "Jedna hodnota na variantu. Jde o marginální modelový odhad zprůměrovaný přes data měření."),
          DTOutput("cum_emm_results")),
-    card(card_header("CLD — kumulativní model (orientační)"),
+    card(card_header("Statistické skupiny po jednotlivých datech (CLD, orientační)"),
          DTOutput("cum_cld_results")),
     card(card_header("Párová porovnání — kumulativní model (orientační)"),
          DTOutput("cum_posthoc_results")),
@@ -298,9 +297,10 @@ ui <- page_navbar(
       ),
       plotOutput("main_plot", height = "600px")
     ),
-    card(card_header("Predikované průměry (emmeans) — podmíněný model"),
+    card(card_header("Souhrnný odhad varianty — podmíněný model (průměr přes časy)"),
+         p(class = "text-muted small", "Jedna hodnota na variantu. Jde o marginální modelový odhad zprůměrovaný přes data měření."),
          DTOutput("emm_results")),
-    card(card_header("CLD — podmíněný model"),
+    card(card_header("Statistické skupiny po jednotlivých datech (CLD) — podmíněný model"),
          DTOutput("cld_results")),
     card(card_header("Párová porovnání — podmíněný model"),
          DTOutput("posthoc_results")),
@@ -353,12 +353,15 @@ server <- function(input, output, session) {
 
   rv <- reactiveValues(
     wide_data = NULL, transformed = FALSE, mono_issues = NULL,
+    treatment_order = NULL,
     inc_data = NULL, full_data = NULL, converted = FALSE,
     M1 = NULL, M2 = NULL, M3 = NULL,
     lr12 = NULL, lr23 = NULL,
     best_model = NULL, posthoc = NULL, cld_df = NULL, emm_plot = NULL,
     final_M0 = NULL, final_M1 = NULL, final_ftest = NULL, final_cld = NULL, final_posthoc = NULL,
     cum_model = NULL, cum_emm = NULL, cum_posthoc = NULL, cum_cld = NULL,
+    # Marginální emmeans (průměr přes časy) pro tab Výsledky
+    emm_marginal = NULL, cum_emm_marginal = NULL,
     aic_bic = NULL,
     log = ""
   )
@@ -370,12 +373,14 @@ server <- function(input, output, session) {
 
   reset_all <- function() {
     rv$wide_data <- NULL; rv$transformed <- FALSE; rv$mono_issues <- NULL
+    rv$treatment_order <- NULL
     rv$inc_data <- NULL; rv$full_data <- NULL; rv$converted <- FALSE
     rv$M1 <- NULL; rv$M2 <- NULL; rv$M3 <- NULL
     rv$lr12 <- NULL; rv$lr23 <- NULL
     rv$best_model <- NULL; rv$posthoc <- NULL; rv$cld_df <- NULL; rv$emm_plot <- NULL
     rv$final_M0 <- NULL; rv$final_M1 <- NULL; rv$final_ftest <- NULL; rv$final_cld <- NULL; rv$final_posthoc <- NULL
     rv$cum_model <- NULL; rv$cum_emm <- NULL; rv$cum_posthoc <- NULL; rv$cum_cld <- NULL
+    rv$emm_marginal <- NULL; rv$cum_emm_marginal <- NULL
     rv$aic_bic <- NULL
   }
 
@@ -438,6 +443,11 @@ server <- function(input, output, session) {
       long$time <- factor(long$time, levels = date_order)
       add_log("Data: ", paste(date_order, collapse = " \u2192 "))
 
+      # Zachovat pořadí variant podle prvního výskytu ve vstupních datech
+      treat_order <- unique(long$treatment)
+      long$treatment <- factor(long$treatment, levels = treat_order)
+      add_log("Varianty: ", paste(treat_order, collapse = ", "))
+
       long <- long %>%
         group_by(treatment, time) %>%
         mutate(pot_id = row_number()) %>%
@@ -467,6 +477,7 @@ server <- function(input, output, session) {
       }
 
       rv$wide_data <- wide; rv$mono_issues <- mono; rv$transformed <- TRUE
+      rv$treatment_order <- treat_order
       rv$inc_data <- NULL; rv$full_data <- NULL; rv$converted <- FALSE
       add_log("\u2713 Transformace: ", nrow(wide), " nádob, ", nrow(mono), " problémů s monotónností")
     }, error = function(e) {
@@ -540,7 +551,8 @@ server <- function(input, output, session) {
 
       long <- wide %>%
         pivot_longer(cols = all_of(dcols), names_to = "time", values_to = "cumulative") %>%
-        mutate(time = factor(time, levels = dcols)) %>%
+        mutate(time = factor(time, levels = dcols),
+               treatment = factor(treatment, levels = rv$treatment_order)) %>%
         arrange(treatment, pot_id, time) %>%
         group_by(treatment, pot_id) %>%
         mutate(cum_prev = lag(cumulative, default = 0),
@@ -639,7 +651,7 @@ server <- function(input, output, session) {
       showNotification("Je potřeba převod dat!", type = "warning"); return()
     }
     dat <- rv$inc_data
-    dat$treatment <- as.factor(dat$treatment)
+    dat$treatment <- factor(dat$treatment, levels = rv$treatment_order)
     fam <- if (input$family_choice == "binomial") binomial else quasibinomial
     fam_name <- input$family_choice
     test_type <- if (fam_name == "quasibinomial") "F" else "Chisq"
@@ -770,6 +782,16 @@ server <- function(input, output, session) {
 
       add_log("\u2713 Temporal analysis complete")
 
+      # ── Marginální emmeans (průměr přes časy) pro podmíněný model ──
+      tryCatch({
+        emm_marg <- emmeans(mod, ~ treatment, type = "response", level = conf_level)
+        rv$emm_marginal <- as.data.frame(emm_marg)
+        add_log("\u2713 Marginální emmeans (podmíněný model) computed")
+      }, error = function(e) {
+        add_log("\u26A0 Marginální emmeans selhaly: ", conditionMessage(e))
+        rv$emm_marginal <- NULL
+      })
+
       # ── Final Germination: simple GLM on last date only ──
       add_log("Running final germination test...")
       tryCatch({
@@ -777,7 +799,7 @@ server <- function(input, output, session) {
         full <- rv$full_data
         last_time <- levels(full$time)[length(levels(full$time))]
         final_dat <- full[full$time == last_time, ]
-        final_dat$treatment <- as.factor(final_dat$treatment)
+        final_dat$treatment <- factor(final_dat$treatment, levels = rv$treatment_order)
         N <- input$N_seeds
 
         # M0: constant model (no treatment effect)
@@ -823,7 +845,7 @@ server <- function(input, output, session) {
       add_log("Orientační kumulativní model...")
       tryCatch({
         full <- rv$full_data
-        full$treatment <- as.factor(full$treatment)
+        full$treatment <- factor(full$treatment, levels = rv$treatment_order)
         N <- input$N_seeds
 
         rv$cum_model <- glm(cbind(cumulative, N - cumulative) ~ treatment * time,
@@ -846,6 +868,16 @@ server <- function(input, output, session) {
         }, error = function(e) {
           add_log("\u26A0 Kumulativní CLD selhalo: ", conditionMessage(e))
           rv$cum_cld <- NULL
+        })
+
+        # Marginální emmeans (průměr přes časy) pro kumulativní model
+        tryCatch({
+          cum_emm_marg <- emmeans(rv$cum_model, ~ treatment, type = "response", level = conf_level)
+          rv$cum_emm_marginal <- as.data.frame(cum_emm_marg)
+          add_log("\u2713 Marginální emmeans (kumulativní model) computed")
+        }, error = function(e) {
+          add_log("\u26A0 Kumulativní marginální emmeans selhaly: ", conditionMessage(e))
+          rv$cum_emm_marginal <- NULL
         })
       }, error = function(e) {
         add_log("\u26A0 Kumulativní model selhal: ", conditionMessage(e))
@@ -962,7 +994,7 @@ server <- function(input, output, session) {
         tags$p(tags$strong("Časový model"), " — analyzuje průběh klíčení v čase (kondicionální přírůstky):",
                style = "margin-bottom: 2px; color: #555;"),
         tags$p(
-          tags$strong("1. Liší se varianty v průběhu klíčení? "),
+          tags$strong("1. Existuje jednotný efekt varianty v průběhu klíčení? "),
           if (treat_sig)
             tags$span(style = "color: #d32f2f;",
               sprintf("\u2714 ANO (p = %s)", format.pval(p_treat, digits = 3)))
@@ -971,7 +1003,8 @@ server <- function(input, output, session) {
               sprintf("\u2718 Statisticky nevýznamný rozdíl (p = %s)", format.pval(p_treat, digits = 3))),
           tags$br(),
           tags$small(class = "text-muted",
-            "Testuje, zda alespoň jedna varianta klíčí jinak než ostatní kdykoli během experimentu.")
+            "Testuje, zda mají jednotlivé varianty jednotný efekt v čase - při silném výsledku interakce může vyjít nevýznamné, i když celkově varianta 
+	    data silně ovlivňuje.")
         ),
         tags$p(
           tags$strong("2. Mění se efekt variant v čase? "),
@@ -983,7 +1016,8 @@ server <- function(input, output, session) {
               sprintf("\u2718 Ne — efekt konzistentní napříč daty (p = %s)", format.pval(p_inter, digits = 3))),
           tags$br(),
           tags$small(class = "text-muted",
-            "Testuje, zda se rozdíly mezi variantami mění v různých datech (např. jedna začne brzy, jiná pozdě).")
+            "Testuje, zda se rozdíly mezi variantami mění v různých datech (např. jedna začne brzy, jiná pozdě). Celkově tedy interakce čas:varianta. Vyjde-li
+	    interakce jako významná, hůře se interpretuje test předchozí.")
         ),
         tags$p(
           tags$strong("3. Použitý model: "),
@@ -1219,7 +1253,7 @@ server <- function(input, output, session) {
       letter = trimws(cld_df$.group),
       stringsAsFactors = FALSE
     )
-    plot_data$treatment <- reorder(plot_data$treatment, plot_data$mean_pct)
+    plot_data$treatment <- factor(plot_data$treatment, levels = rv$treatment_order)
 
     last_time <- levels(dat$time)[length(levels(dat$time))]
 
@@ -1253,13 +1287,8 @@ server <- function(input, output, session) {
     req(rv$emm_plot); df <- rv$emm_plot
     ci_pct <- round((1 - input$alpha) * 100)
 
-    # Sort treatments by overall probability
-    treat_order <- df %>%
-      group_by(treatment) %>%
-      summarise(m = mean(prob), .groups = "drop") %>%
-      arrange(m) %>%
-      pull(treatment)
-    df$treatment <- factor(df$treatment, levels = treat_order)
+    # Zachovat pořadí variant ze vstupního souboru
+    df$treatment <- factor(df$treatment, levels = rv$treatment_order)
 
     if (!"time" %in% names(df)) {
       ggplot(df, aes(x = treatment, y = prob, fill = treatment)) +
@@ -1327,12 +1356,7 @@ server <- function(input, output, session) {
       sub_default <- sprintf("Surová data, průměr \u00B1 %d%% CI", ci_pct)
     }
 
-    last_date <- tail(levels(rv$full_data$time), 1)
-    treat_order <- timeline %>%
-      filter(time == last_date) %>%
-      arrange(mean_pct) %>%
-      pull(treatment)
-    timeline$treatment <- factor(timeline$treatment, levels = treat_order)
+    timeline$treatment <- factor(timeline$treatment, levels = rv$treatment_order)
 
     ggplot(timeline, aes(x = treatment, y = mean_pct, fill = time)) +
       geom_col(position = position_dodge(width = 0.8), width = 0.7, alpha = 0.85) +
@@ -1362,12 +1386,7 @@ server <- function(input, output, session) {
       group_by(treatment, time) %>%
       summarise(mean_pct = mean(cumulative / N * 100), .groups = "drop")
 
-    treat_order <- heat_data %>%
-      group_by(treatment) %>%
-      summarise(overall = mean(mean_pct), .groups = "drop") %>%
-      arrange(overall) %>%
-      pull(treatment)
-    heat_data$treatment <- factor(heat_data$treatment, levels = treat_order)
+    heat_data$treatment <- factor(heat_data$treatment, levels = rv$treatment_order)
 
     ggplot(heat_data, aes(x = time, y = treatment, fill = mean_pct)) +
       geom_tile(colour = "white", linewidth = 1.5) +
@@ -1393,15 +1412,8 @@ server <- function(input, output, session) {
   # Duplikáty tabulek pro tab Výsledky a grafy
   # ════════════════════════════════════════════════════════════
 
-  # Jednoduchý test
+  # Jednoduchý test — emmeans + CLD v jedné tabulce (jen jedno datum, není co marginalizovat)
   output$final_emm_results <- renderDT({
-    req(rv$final_cld)
-    df <- rv$final_cld; nums <- names(df)[sapply(df, is.numeric)]
-    datatable(df, options = list(pageLength = 15, scrollX = TRUE), rownames = FALSE) %>%
-      formatRound(columns = nums, digits = 4)
-  })
-
-  output$final_cld_results <- renderDT({
     req(rv$final_cld)
     df <- rv$final_cld; nums <- names(df)[sapply(df, is.numeric)]
     datatable(df, options = list(pageLength = 15, scrollX = TRUE), rownames = FALSE) %>%
@@ -1415,14 +1427,15 @@ server <- function(input, output, session) {
       formatRound(columns = nums, digits = 4)
   })
 
-  # Kumulativní model
+  # Kumulativní model — emmeans = marginální průměr přes časy
   output$cum_emm_results <- renderDT({
-    req(rv$cum_emm)
-    df <- rv$cum_emm; nums <- names(df)[sapply(df, is.numeric)]
+    req(rv$cum_emm_marginal)
+    df <- rv$cum_emm_marginal; nums <- names(df)[sapply(df, is.numeric)]
     datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
       formatRound(columns = nums, digits = 4)
   })
 
+  # Kumulativní model — CLD = skupiny po jednotlivých datech
   output$cum_cld_results <- renderDT({
     req(rv$cum_cld)
     df <- rv$cum_cld; nums <- names(df)[sapply(df, is.numeric)]
@@ -1437,10 +1450,10 @@ server <- function(input, output, session) {
       formatRound(columns = nums, digits = 4)
   })
 
-  # Podmíněný model
+  # Podmíněný model — emmeans = marginální průměr přes časy
   output$emm_results <- renderDT({
-    req(rv$emm_plot)
-    df <- rv$emm_plot; nums <- names(df)[sapply(df, is.numeric)]
+    req(rv$emm_marginal)
+    df <- rv$emm_marginal; nums <- names(df)[sapply(df, is.numeric)]
     datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
       formatRound(columns = nums, digits = 4)
   })
