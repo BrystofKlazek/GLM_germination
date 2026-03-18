@@ -110,7 +110,7 @@ ui <- page_navbar(
           col_widths = c(6, 6),
           card_body(
             actionButton("transform_btn", "Transformace z dlouhého na širokého",
-                         class = "btn-primary btn-lg"),
+                         class = "btn-success btn-lg"),
             uiOutput("transform_status")
           ),
           uiOutput("transform_summary")
@@ -140,7 +140,7 @@ ui <- page_navbar(
           col_widths = c(6, 6),
           card_body(
             actionButton("convert_btn", "Převod na kondicionální přírůstky",
-                         class = "btn-info btn-lg"),
+                         class = "btn-success btn-lg"),
             uiOutput("convert_status")
           ),
           uiOutput("conversion_summary")
@@ -173,7 +173,7 @@ ui <- page_navbar(
     card(card_header("AIC / BIC porovnání"),
          uiOutput("aic_bic_note"),
          DTOutput("aic_bic_table")),
-    card(card_header("Predikované průměry (emmeans)"),
+    card(card_header("Predikované průměry — podmíněný model (emmeans)"),
          uiOutput("emm_info"),
          DTOutput("emm_table")),
     card(card_header("Párová porovnání variant (post-hoc)"),
@@ -184,7 +184,26 @@ ui <- page_navbar(
                        "Mají-li dvě varianty společné písmenko, nejsou na zvolené hladině statisticky rozlišitelné.")),
          DTOutput("cld_table")),
     card(card_header("Shrnutí modelů (technické detaily)"),
-         verbatimTextOutput("model_summaries"))
+         verbatimTextOutput("model_summaries")),
+
+    # ── Kumulativní model (orientační) ──
+    card(
+      card_header("Orientační kumulativní model"),
+      card_body(class = "bg-light",
+        p(tags$strong("Pozor:"), " Tento model fituje GLM přímo na kumulativních počtech ",
+          tags$code("cbind(cumulative, N - cumulative) ~ treatment * time"), ". ",
+          "Pozorování ze stejného květináče v různých datech jsou silně korelovaná, ",
+          "takže p-hodnoty a CI jsou pouze orientační a nelze z nich dělat formální závěry. ",
+          "Pro formální testování použijte kondicionální model výše nebo jednoduchý test.")
+      )
+    ),
+    uiOutput("cum_model_summary"),
+    card(card_header("Kumulativní model — predikované průměry (emmeans)"),
+         DTOutput("cum_emm_table")),
+    card(card_header("Kumulativní model — párová porovnání"),
+         DTOutput("cum_posthoc_table")),
+    card(card_header("Kumulativní model — statistické skupiny (CLD)"),
+         DTOutput("cum_cld_table"))
   ),
 
   # ── Tab 5: Jednoduchý test ──
@@ -213,7 +232,7 @@ ui <- page_navbar(
   nav_panel("5) Výsledky a grafy",
     uiOutput("ftest_summary_results"),
 
-    # ── Graf 1: Sloupcový graf celkové vzcházivosti ──
+    # ── Graf 1: Sloupcový graf celkové vzcházivosti + tabulky ──
     card(full_screen = TRUE,
       card_header("Celková vzcházivost dle varianty (jednoduchý test)"),
       p(class = "text-muted",
@@ -230,13 +249,18 @@ ui <- page_navbar(
       ),
       plotOutput("final_bar_plot", height = "550px")
     ),
+    card(card_header("Predikované průměry (emmeans) — jednoduchý test"),
+         DTOutput("final_emm_results")),
+    card(card_header("CLD — jednoduchý test (poslední datum)"),
+         DTOutput("final_cld_results")),
+    card(card_header("Párová porovnání — jednoduchý test"),
+         DTOutput("final_posthoc_results")),
 
-    # ── Graf 2: Postup klíčivosti v čase ──
+    # ── Graf 2: Postup klíčivosti v čase + tabulky ──
     card(full_screen = TRUE,
-      card_header("Postup klíčivosti v čase (surová data)"),
+      card_header("Postup klíčivosti v čase"),
       p(class = "text-muted",
-        "Kumulativní vzcházivost v jednotlivých datech měření. ",
-        "Surová data (průměr přes nádoby)."),
+        "Kumulativní vzcházivost v jednotlivých datech měření (orientační model)."),
       bslib::accordion(
         open = FALSE,
         bslib::accordion_panel("Upravit popisky grafu",
@@ -249,8 +273,14 @@ ui <- page_navbar(
       ),
       plotOutput("timeline_plot", height = "550px")
     ),
+    card(card_header("Predikované průměry (emmeans) — kumulativní model (orientační)"),
+         DTOutput("cum_emm_results")),
+    card(card_header("CLD — kumulativní model (orientační)"),
+         DTOutput("cum_cld_results")),
+    card(card_header("Párová porovnání — kumulativní model (orientační)"),
+         DTOutput("cum_posthoc_results")),
 
-    # ── Graf 3: Podmíněná pravděpodobnost ──
+    # ── Graf 3: Podmíněná pravděpodobnost + tabulky ──
     card(full_screen = TRUE,
       card_header("Podmíněná pravděpodobnost klíčení (odhady z modelu)"),
       p(class = "text-muted",
@@ -268,6 +298,12 @@ ui <- page_navbar(
       ),
       plotOutput("main_plot", height = "600px")
     ),
+    card(card_header("Predikované průměry (emmeans) — podmíněný model"),
+         DTOutput("emm_results")),
+    card(card_header("CLD — podmíněný model"),
+         DTOutput("cld_results")),
+    card(card_header("Párová porovnání — podmíněný model"),
+         DTOutput("posthoc_results")),
 
     # ── Graf 4: Teplotní mapa ──
     card(full_screen = TRUE,
@@ -322,6 +358,7 @@ server <- function(input, output, session) {
     lr12 = NULL, lr23 = NULL,
     best_model = NULL, posthoc = NULL, cld_df = NULL, emm_plot = NULL,
     final_M0 = NULL, final_M1 = NULL, final_ftest = NULL, final_cld = NULL, final_posthoc = NULL,
+    cum_model = NULL, cum_emm = NULL, cum_posthoc = NULL, cum_cld = NULL,
     aic_bic = NULL,
     log = ""
   )
@@ -338,6 +375,7 @@ server <- function(input, output, session) {
     rv$lr12 <- NULL; rv$lr23 <- NULL
     rv$best_model <- NULL; rv$posthoc <- NULL; rv$cld_df <- NULL; rv$emm_plot <- NULL
     rv$final_M0 <- NULL; rv$final_M1 <- NULL; rv$final_ftest <- NULL; rv$final_cld <- NULL; rv$final_posthoc <- NULL
+    rv$cum_model <- NULL; rv$cum_emm <- NULL; rv$cum_posthoc <- NULL; rv$cum_cld <- NULL
     rv$aic_bic <- NULL
   }
 
@@ -781,6 +819,39 @@ server <- function(input, output, session) {
         add_log("\u26A0 Final germination error: ", conditionMessage(e))
       })
 
+      # ── Orientační kumulativní model ──
+      add_log("Orientační kumulativní model...")
+      tryCatch({
+        full <- rv$full_data
+        full$treatment <- as.factor(full$treatment)
+        N <- input$N_seeds
+
+        rv$cum_model <- glm(cbind(cumulative, N - cumulative) ~ treatment * time,
+                            family = fam, data = full)
+
+        cum_emm <- emmeans(rv$cum_model, ~ treatment | time, type = "response", level = conf_level)
+        rv$cum_emm <- as.data.frame(cum_emm)
+
+        cum_pairs <- emmeans(rv$cum_model, pairwise ~ treatment | time,
+                             adjust = input$p_method, type = "response", level = conf_level)
+        rv$cum_posthoc <- as.data.frame(cum_pairs$contrasts)
+
+        tryCatch({
+          cum_cld_res <- multcomp::cld(cum_emm, adjust = input$p_method,
+                                        Letters = letters, sort = FALSE, alpha = input$alpha)
+          cum_cld_df <- as.data.frame(cum_cld_res)
+          cum_cld_df$.group <- trimws(cum_cld_df$.group)
+          rv$cum_cld <- cum_cld_df
+          add_log("\u2713 Kumulativní model: emmeans + CLD + post-hoc hotovo")
+        }, error = function(e) {
+          add_log("\u26A0 Kumulativní CLD selhalo: ", conditionMessage(e))
+          rv$cum_cld <- NULL
+        })
+      }, error = function(e) {
+        add_log("\u26A0 Kumulativní model selhal: ", conditionMessage(e))
+        rv$cum_model <- NULL; rv$cum_emm <- NULL; rv$cum_posthoc <- NULL; rv$cum_cld <- NULL
+      })
+
       add_log("\u2713 All analyses complete")
     }, error = function(e) {
       add_log("\u274C ", conditionMessage(e))
@@ -975,8 +1046,7 @@ server <- function(input, output, session) {
       "Odhady podmíněné pravděpodobnosti klíčení pro každou variantu v každém datu (model s interakcí)."
     else
       "Odhady podmíněné pravděpodobnosti klíčení pro každou variantu (průměr přes data, model bez interakce)."
-    div(class = "alert alert-light",
-        tags$small(txt))
+    div(class = "alert alert-light", tags$small(txt))
   })
 
   output$emm_table <- renderDT({
@@ -1007,6 +1077,45 @@ server <- function(input, output, session) {
   output$cld_table <- renderDT({
     req(rv$cld_df)
     df <- rv$cld_df; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
+
+  # ════════════════════════════════════════════════════════════
+  # Orientační kumulativní model — renderery
+  # ════════════════════════════════════════════════════════════
+
+  output$cum_model_summary <- renderUI({
+    req(rv$cum_model)
+    phi <- rv$cum_model$deviance / rv$cum_model$df.residual
+    is_quasi <- input$family_choice == "quasibinomial"
+    div(class = "alert alert-secondary",
+      tags$strong("Kumulativní model (orientační): "),
+      sprintf("treatment * time, \u03C6 = %.2f", phi),
+      if (is_quasi) sprintf(", SE inflace = \u00D7%.2f", sqrt(phi)) else "",
+      tags$br(),
+      tags$small(class = "text-muted",
+        "Pozorování z téhož květináče jsou korelovaná — výsledky jsou pouze orientační.")
+    )
+  })
+
+  output$cum_emm_table <- renderDT({
+    req(rv$cum_emm)
+    df <- rv$cum_emm; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
+
+  output$cum_posthoc_table <- renderDT({
+    req(rv$cum_posthoc)
+    df <- rv$cum_posthoc; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
+
+  output$cum_cld_table <- renderDT({
+    req(rv$cum_cld)
+    df <- rv$cum_cld; nums <- names(df)[sapply(df, is.numeric)]
     datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
       formatRound(columns = nums, digits = 4)
   })
@@ -1191,22 +1300,34 @@ server <- function(input, output, session) {
   # Timeline: treatments on x, colored by date, grouped bars with SE
   output$timeline_plot <- renderPlot({
     req(rv$full_data)
-    dat <- rv$full_data; N <- input$N_seeds
     ci_pct <- round((1 - input$alpha) * 100)
-    z_crit <- qnorm(1 - input$alpha / 2)
 
-    timeline <- dat %>%
-      group_by(treatment, time) %>%
-      summarise(
-        mean_pct = mean(cumulative / N * 100),
-        se = sd(cumulative / N * 100) / sqrt(n()),
-        .groups = "drop"
-      ) %>%
-      mutate(ci_lo = pmax(0, mean_pct - z_crit * se),
-             ci_hi = pmin(100, mean_pct + z_crit * se))
+    if (!is.null(rv$cum_emm)) {
+      timeline <- data.frame(
+        treatment = rv$cum_emm$treatment,
+        time = rv$cum_emm$time,
+        mean_pct = rv$cum_emm$prob * 100,
+        ci_lo = rv$cum_emm$asymp.LCL * 100,
+        ci_hi = rv$cum_emm$asymp.UCL * 100,
+        stringsAsFactors = FALSE
+      )
+      sub_default <- sprintf("Modelové odhady (emmeans) \u00B1 %d%% CI — orientační (korelovaná data)", ci_pct)
+    } else {
+      dat <- rv$full_data; N <- input$N_seeds
+      z_crit <- qnorm(1 - input$alpha / 2)
+      timeline <- dat %>%
+        group_by(treatment, time) %>%
+        summarise(
+          mean_pct = mean(cumulative / N * 100),
+          se = sd(cumulative / N * 100) / sqrt(n()),
+          .groups = "drop"
+        ) %>%
+        mutate(ci_lo = pmax(0, mean_pct - z_crit * se),
+               ci_hi = pmin(100, mean_pct + z_crit * se))
+      sub_default <- sprintf("Surová data, průměr \u00B1 %d%% CI", ci_pct)
+    }
 
-    # Sort treatments by final date mean
-    last_date <- levels(dat$time)[length(levels(dat$time))]
+    last_date <- tail(levels(rv$full_data$time), 1)
     treat_order <- timeline %>%
       filter(time == last_date) %>%
       arrange(mean_pct) %>%
@@ -1223,7 +1344,7 @@ server <- function(input, output, session) {
            y = lbl("lbl_time_y", "Kumulativní klíčivost (%)"),
            fill = lbl("lbl_time_legend", "Datum"),
            title = lbl("lbl_time_title", "Postup klíčivosti dle varianty"),
-           subtitle = lbl("lbl_time_subtitle", sprintf("Kumulativní klíčivost v jednotlivých datech (%d%% CI)", ci_pct))) +
+           subtitle = lbl("lbl_time_subtitle", sub_default)) +
       theme_minimal(base_size = 14) +
       theme(plot.title = element_text(face = "bold", size = 18),
             plot.subtitle = element_text(colour = "grey50", size = 12),
@@ -1266,6 +1387,76 @@ server <- function(input, output, session) {
             axis.text.x = element_text(size = 12),
             panel.grid = element_blank(),
             legend.position = "right")
+  })
+
+  # ════════════════════════════════════════════════════════════
+  # Duplikáty tabulek pro tab Výsledky a grafy
+  # ════════════════════════════════════════════════════════════
+
+  # Jednoduchý test
+  output$final_emm_results <- renderDT({
+    req(rv$final_cld)
+    df <- rv$final_cld; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 15, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
+
+  output$final_cld_results <- renderDT({
+    req(rv$final_cld)
+    df <- rv$final_cld; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 15, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
+
+  output$final_posthoc_results <- renderDT({
+    req(rv$final_posthoc)
+    df <- rv$final_posthoc; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 15, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
+
+  # Kumulativní model
+  output$cum_emm_results <- renderDT({
+    req(rv$cum_emm)
+    df <- rv$cum_emm; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
+
+  output$cum_cld_results <- renderDT({
+    req(rv$cum_cld)
+    df <- rv$cum_cld; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
+
+  output$cum_posthoc_results <- renderDT({
+    req(rv$cum_posthoc)
+    df <- rv$cum_posthoc; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
+
+  # Podmíněný model
+  output$emm_results <- renderDT({
+    req(rv$emm_plot)
+    df <- rv$emm_plot; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
+
+  output$cld_results <- renderDT({
+    req(rv$cld_df)
+    df <- rv$cld_df; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
+
+  output$posthoc_results <- renderDT({
+    req(rv$posthoc)
+    df <- rv$posthoc; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
   })
 
   # ════════════════════════════════════════════════════════════
