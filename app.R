@@ -62,7 +62,21 @@ ui <- page_navbar(
     card(
       card_header("Nastavení"),
       numericInput("N_seeds", "Semínek ve sledované nádobě", value = 3, min = 1),
-      selectInput("p_method", "Korekce P-hodnot pro porovnávání",
+      radioButtons(
+        "contrast_mode",
+        "Rezim post-hoc porovnani",
+        choices = c(
+          "Proti kontrole (Dunnett)" = "dunnett",
+          "Vsechny pary" = "allpairs"
+        ),
+        selected = "dunnett"
+      ),
+      selectInput("control_variant", "Kontrolni varianta (pro Dunnett)",
+                  choices = "(nahrajte soubor)", selected = NULL),
+      p(class = "text-muted small",
+        "Dunnett porovnava kazdou variantu jen proti zvolene kontrole. ",
+        "Mene prisny nez all-pairs. Vhodny kdyz je hlavni otazka: lisi se osetreni od kontroly?"),
+      selectInput("p_method", "Korekce P-hodnot (pro vsechny pary)",
                   choices = c("sidak", "bonferroni", "tukey", "scheffe", "none")),
       numericInput("alpha", "Hladina testu", value = 0.05,
                    min = 0.001, max = 0.2, step = 0.01),
@@ -211,6 +225,8 @@ ui <- page_navbar(
     card(card_header("Kontrasty variant (rozdíly + adjustované CI)"),
          uiOutput("posthoc_info"),
          DTOutput("posthoc_table")),
+    card(card_header("Kontrasty proti kontrole (Dunnett)"),
+         DTOutput("dunnett_table")),
     card(card_header("Statistické skupiny (CLD)",
                      tags$span(class = "text-muted small ms-2",
                        "Mají-li dvě varianty společné písmenko, nejsou na zvolené hladině statisticky rozlišitelné.")),
@@ -234,6 +250,8 @@ ui <- page_navbar(
          DTOutput("cum_emm_table")),
     card(card_header("Kumulativní model — kontrasty variant (rozdíly + adjustované CI)"),
          DTOutput("cum_posthoc_table")),
+    card(card_header("Kumulativní model — kontrasty proti kontrole (Dunnett)"),
+         DTOutput("dunnett_cum_table")),
     card(card_header("Kumulativní model — statistické skupiny (CLD)"),
          DTOutput("cum_cld_table"))
   ),
@@ -257,7 +275,9 @@ ui <- page_navbar(
     card(card_header("Predikované průměry (emmeans) a statistické skupiny (CLD)"),
          DTOutput("final_cld_table")),
     card(card_header("Kontrasty variant (rozdíly + adjustované CI)"),
-         DTOutput("final_posthoc_table"))
+         DTOutput("final_posthoc_table")),
+    card(card_header("Kontrasty proti kontrole (Dunnett)"),
+         DTOutput("dunnett_final_table"))
   ),
 
   # ── Tab 6: Výsledky a grafy ──
@@ -295,6 +315,13 @@ ui <- page_navbar(
          DTOutput("final_emm_results")),
     card(card_header("Kontrasty variant — jednoduchý test"),
          DTOutput("final_posthoc_results")),
+    card(full_screen = TRUE,
+        card_header("Jednoduchý test — Dunnett forest plot (proti kontrole)"),
+        p(class = "text-muted", "Kontrasty kazde varianty jen proti kontrole s Dunnettovou korekci."),
+        plotOutput("dunnett_final_contrast_plot", height = "550px")
+    ),
+    card(card_header("Kontrasty proti kontrole (Dunnett) — jednoduchý test"),
+         DTOutput("dunnett_final_results")),
 
     # ── Graf 2: Postup klíčivosti v čase + tabulky ──
     card(full_screen = TRUE,
@@ -331,6 +358,13 @@ ui <- page_navbar(
          DTOutput("cum_cld_results")),
     card(card_header("Kontrasty variant — kumulativní model (orientační)"),
          DTOutput("cum_posthoc_results")),
+    card(full_screen = TRUE,
+        card_header("Kumulativní model — Dunnett forest plot (proti kontrole)"),
+        p(class = "text-muted", "Kontrasty proti kontrole v jednotlivych datech s Dunnettovou korekci (orientacni)."),
+        plotOutput("dunnett_cum_contrast_plot", height = "650px")
+    ),
+    card(card_header("Kontrasty proti kontrole (Dunnett) — kumulativní model (orientační)"),
+         DTOutput("dunnett_cum_results")),
 
     # ── Graf 3: Podmíněná pravděpodobnost + tabulky ──
     card(full_screen = TRUE,
@@ -368,6 +402,13 @@ ui <- page_navbar(
          DTOutput("cld_results")),
     card(card_header("Kontrasty variant — podmíněný model"),
          DTOutput("posthoc_results")),
+    card(full_screen = TRUE,
+        card_header("Podmíněný model — Dunnett forest plot (proti kontrole)"),
+        p(class = "text-muted", "Kontrasty kazde varianty proti kontrole s Dunnettovou korekci."),
+        plotOutput("dunnett_cond_contrast_plot", height = "650px")
+    ),
+    card(card_header("Kontrasty proti kontrole (Dunnett) — podmíněný model"),
+         DTOutput("dunnett_cond_results")),
 
     # ── Graf 4: Teplotní mapa ──
     card(full_screen = TRUE,
@@ -443,6 +484,22 @@ server <- function(input, output, session) {
       infer = c(TRUE, TRUE),
       level = conf_level,
       adjust = adjust_method
+    ))
+    standardize_interval_cols(out)
+  }
+
+  make_dunnett_table <- function(emm_obj, control_name, conf_level, scale = "link") {
+    obj <- get_inference_emm(emm_obj, scale = scale)
+    levs <- levels(obj)$treatment
+    if (is.null(levs)) levs <- levels(obj)[[1]]
+    ref_idx <- which(levs == control_name)
+    if (length(ref_idx) == 0) ref_idx <- 1
+    pw <- contrast(obj, method = "trt.vs.ctrl", ref = ref_idx, adjust = "dunnettx")
+    out <- as.data.frame(summary(
+      pw,
+      infer = c(TRUE, TRUE),
+      level = conf_level,
+      adjust = "dunnettx"
     ))
     standardize_interval_cols(out)
   }
@@ -639,6 +696,9 @@ server <- function(input, output, session) {
     emm_group_band = NULL,
     final_group_band = NULL,
     cum_group_band = NULL,
+    dunnett_posthoc = NULL,
+    dunnett_final_posthoc = NULL,
+    dunnett_cum_posthoc = NULL
   )
 
   add_log <- function(...) {
@@ -660,6 +720,9 @@ server <- function(input, output, session) {
     rv$emm_group_band <- NULL
     rv$final_group_band <- NULL
     rv$cum_group_band <- NULL
+    rv$dunnett_posthoc <- NULL
+    rv$dunnett_final_posthoc <- NULL
+    rv$dunnett_cum_posthoc <- NULL
   }
 
   uploaded <- reactiveVal(NULL)
@@ -745,6 +808,7 @@ server <- function(input, output, session) {
       rv$wide_data <- wide; rv$mono_issues <- mono; rv$transformed <- TRUE
       rv$treatment_order <- treat_order
       rv$inc_data <- NULL; rv$full_data <- NULL; rv$converted <- FALSE
+      updateSelectInput(session, "control_variant", choices = treat_order, selected = treat_order[1])
       add_log("\u2713 Transformace: ", nrow(wide), " nádob, ", nrow(mono), " problémů s monotónností")
     }, error = function(e) {
       add_log("\u274C ", conditionMessage(e))
@@ -999,7 +1063,18 @@ server <- function(input, output, session) {
 	  rv$emm_plot <- as.data.frame(summary(emm_time, type = "response", level = conf_level))
 	  rv$emm_group_band <- make_group_band_table(emm_main, conf_level, input$infer_scale)
 	}
-      
+
+      rv$dunnett_posthoc <- NULL
+      tryCatch({
+        ctrl <- input$control_variant
+        if (!is.null(ctrl) && ctrl %in% rv$treatment_order) {
+          rv$dunnett_posthoc <- make_dunnett_table(emm_main, ctrl, conf_level, input$infer_scale)
+          add_log("Dunnett contrasts (podminenych) vs ", ctrl)
+        }
+      }, error = function(e) {
+        add_log("Dunnett (podmineny) selhal: ", conditionMessage(e))
+      })
+
       rv$cld_df <- NULL
       tryCatch({
         if (rv$best_model == "M3") {
@@ -1084,6 +1159,16 @@ server <- function(input, output, session) {
 	  rv$final_posthoc <- make_contrast_table(emm_final, input$p_method, conf_level, input$infer_scale)
           rv$final_cld <- make_cld_table(emm_final, input$p_method, input$alpha, input$infer_scale)
           add_log("\u2713 Final CLD + post-hoc computed on ", input$infer_scale, " scale")
+          rv$dunnett_final_posthoc <- NULL
+          tryCatch({
+            ctrl <- input$control_variant
+            if (!is.null(ctrl) && ctrl %in% rv$treatment_order) {
+              rv$dunnett_final_posthoc <- make_dunnett_table(emm_final, ctrl, conf_level, input$infer_scale)
+              add_log("Dunnett contrasts (jednoduchy) vs ", ctrl)
+            }
+          }, error = function(e2) {
+            add_log("Dunnett (jednoduchy) selhal: ", conditionMessage(e2))
+          })
         }, error = function(e) {
           add_log("\u26A0 Final CLD/post-hoc failed: ", conditionMessage(e))
           rv$final_cld <- NULL
@@ -1109,6 +1194,17 @@ server <- function(input, output, session) {
 	)
 	rv$cum_emm <- as.data.frame(summary(cum_emm, type = "response", level = conf_level))
         rv$cum_posthoc <- make_contrast_table(cum_emm, input$p_method, conf_level, input$infer_scale)
+
+        rv$dunnett_cum_posthoc <- NULL
+        tryCatch({
+          ctrl <- input$control_variant
+          if (!is.null(ctrl) && ctrl %in% rv$treatment_order) {
+            rv$dunnett_cum_posthoc <- make_dunnett_table(cum_emm, ctrl, conf_level, input$infer_scale)
+            add_log("Dunnett contrasts (kumulativni) vs ", ctrl)
+          }
+        }, error = function(e) {
+          add_log("Dunnett (kumulativni) selhal: ", conditionMessage(e))
+        })
 
         tryCatch({
           rv$cum_cld <- make_cld_table(cum_emm, input$p_method, input$alpha, input$infer_scale)
@@ -1874,6 +1970,78 @@ server <- function(input, output, session) {
     df <- rv$posthoc; nums <- names(df)[sapply(df, is.numeric)]
     datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
       formatRound(columns = nums, digits = 4)
+  })
+
+  output$dunnett_table <- renderDT({
+    req(rv$dunnett_posthoc)
+    df <- rv$dunnett_posthoc; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
+
+  output$dunnett_cum_table <- renderDT({
+    req(rv$dunnett_cum_posthoc)
+    df <- rv$dunnett_cum_posthoc; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
+
+  output$dunnett_final_table <- renderDT({
+    req(rv$dunnett_final_posthoc)
+    df <- rv$dunnett_final_posthoc; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
+
+  output$dunnett_final_results <- renderDT({
+    req(rv$dunnett_final_posthoc)
+    df <- rv$dunnett_final_posthoc; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 15, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
+
+  output$dunnett_cum_results <- renderDT({
+    req(rv$dunnett_cum_posthoc)
+    df <- rv$dunnett_cum_posthoc; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
+
+  output$dunnett_cond_results <- renderDT({
+    req(rv$dunnett_posthoc)
+    df <- rv$dunnett_posthoc; nums <- names(df)[sapply(df, is.numeric)]
+    datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
+      formatRound(columns = nums, digits = 4)
+  })
+
+  output$dunnett_final_contrast_plot <- renderPlot({
+    req(rv$dunnett_final_posthoc)
+    ctrl <- input$control_variant
+    make_contrast_plot(
+      rv$dunnett_final_posthoc,
+      sprintf("Jednoduchy test - Dunnett (vs %s)", ctrl),
+      sprintf("Dunnettova korekce; %d%% intervaly kontrastu", round((1 - input$alpha) * 100))
+    )
+  })
+
+  output$dunnett_cum_contrast_plot <- renderPlot({
+    req(rv$dunnett_cum_posthoc)
+    ctrl <- input$control_variant
+    make_contrast_plot(
+      rv$dunnett_cum_posthoc,
+      sprintf("Kumulativni model - Dunnett (vs %s)", ctrl),
+      sprintf("Dunnettova korekce; %d%% intervaly kontrastu (orientacni)", round((1 - input$alpha) * 100))
+    )
+  })
+
+  output$dunnett_cond_contrast_plot <- renderPlot({
+    req(rv$dunnett_posthoc)
+    ctrl <- input$control_variant
+    make_contrast_plot(
+      rv$dunnett_posthoc,
+      sprintf("Podmineny model - Dunnett (vs %s)", ctrl),
+      sprintf("Dunnettova korekce; %d%% intervaly kontrastu", round((1 - input$alpha) * 100))
+    )
   })
 
   output$diag_plot <- renderPlot({
