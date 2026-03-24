@@ -71,13 +71,20 @@ ui <- page_navbar(
         ),
         selected = "dunnett"
       ),
-      selectInput("control_variant", "Kontrolni varianta (pro Dunnett)",
-                  choices = "(nahrajte soubor)", selected = NULL),
-      p(class = "text-muted small",
-        "Dunnett porovnava kazdou variantu jen proti zvolene kontrole. ",
-        "Mene prisny nez all-pairs. Vhodny kdyz je hlavni otazka: lisi se osetreni od kontroly?"),
-      selectInput("p_method", "Korekce P-hodnot (pro vsechny pary)",
-                  choices = c("sidak", "bonferroni", "tukey", "scheffe", "none")),
+      conditionalPanel(
+        condition = "input.contrast_mode == 'dunnett'",
+        selectInput("control_variant", "Kontrolní varianta (pro Dunnett)",
+                    choices = "(nahrajte soubor)", selected = NULL),
+        p(class = "text-muted small",
+          "Dunnett porovnava kazdou variantu jen proti zvolene kontrole. ",
+          "Mene prisny nez all-pairs. Vhodny kdyz je hlavni otazka: lisi se osetreni od kontroly? ",
+          "Písmenka v grafech: a = jako kontrola, b = lepší než kontrola, c = horší než kontrola.")
+      ),
+      conditionalPanel(
+        condition = "input.contrast_mode == 'allpairs'",
+        selectInput("p_method", "Korekce P-hodnot (pro všechny páry)",
+                    choices = c("sidak", "bonferroni", "tukey", "scheffe", "none"))
+      ),
       numericInput("alpha", "Hladina testu", value = 0.05,
                    min = 0.001, max = 0.2, step = 0.01),
       radioButtons(
@@ -93,7 +100,9 @@ ui <- page_navbar(
         "Model scale = statisticky standardní a nejlépe odpovídá inferenci modelu. ",
         "Response scale = interpretačně přirozenější, ale experimentální a méně statisticky přesné. Contrasts i CLD se mohou lišit od standardního modelového pohledu."
       ),
-	checkboxInput(
+	conditionalPanel(
+	  condition = "input.contrast_mode == 'allpairs'",
+	  checkboxInput(
 		  "show_group_bands",
 		  "Zobrazit grouping bands (simultánní intervaly)",
 		  value = TRUE
@@ -101,7 +110,7 @@ ui <- page_navbar(
 		p(class = "text-muted small",
 		  "Tenké přerušované úsečky = simultánní intervaly pro celou rodinu odhadů. ",
 		  "Mají lépe odpovídat CLD než běžné CI, ale nejsou s CLD úplně ekvivalentní."
-	),
+	)),
       selectInput("model_choice", "Volba modelu (interakce)",
                   choices = c("Automaticky (dle testu)" = "auto",
                               "Vždy s interakcí (varianta × čas)" = "M3",
@@ -224,13 +233,21 @@ ui <- page_navbar(
          DTOutput("emm_table")),
     card(card_header("Kontrasty variant (rozdíly + adjustované CI)"),
          uiOutput("posthoc_info"),
-         DTOutput("posthoc_table")),
-    card(card_header("Kontrasty proti kontrole (Dunnett)"),
-         DTOutput("dunnett_table")),
-    card(card_header("Statistické skupiny (CLD)",
-                     tags$span(class = "text-muted small ms-2",
-                       "Mají-li dvě varianty společné písmenko, nejsou na zvolené hladině statisticky rozlišitelné.")),
-         DTOutput("cld_table")),
+         conditionalPanel(
+           condition = "input.contrast_mode == 'allpairs'",
+           DTOutput("posthoc_table")
+         ),
+         conditionalPanel(
+           condition = "input.contrast_mode == 'dunnett'",
+           DTOutput("dunnett_table")
+         )),
+    conditionalPanel(
+      condition = "input.contrast_mode == 'allpairs'",
+      card(card_header("Statistické skupiny (CLD)",
+                       tags$span(class = "text-muted small ms-2",
+                         "Mají-li dvě varianty společné písmenko, nejsou na zvolené hladině statisticky rozlišitelné.")),
+           DTOutput("cld_table"))
+    ),
     card(card_header("Shrnutí modelů (technické detaily)"),
          verbatimTextOutput("model_summaries")),
 
@@ -249,11 +266,19 @@ ui <- page_navbar(
     card(card_header("Kumulativní model — predikované průměry (emmeans)"),
          DTOutput("cum_emm_table")),
     card(card_header("Kumulativní model — kontrasty variant (rozdíly + adjustované CI)"),
-         DTOutput("cum_posthoc_table")),
-    card(card_header("Kumulativní model — kontrasty proti kontrole (Dunnett)"),
-         DTOutput("dunnett_cum_table")),
-    card(card_header("Kumulativní model — statistické skupiny (CLD)"),
-         DTOutput("cum_cld_table"))
+         conditionalPanel(
+           condition = "input.contrast_mode == 'allpairs'",
+           DTOutput("cum_posthoc_table")
+         ),
+         conditionalPanel(
+           condition = "input.contrast_mode == 'dunnett'",
+           DTOutput("dunnett_cum_table")
+         )),
+    conditionalPanel(
+      condition = "input.contrast_mode == 'allpairs'",
+      card(card_header("Kumulativní model — statistické skupiny (CLD)"),
+           DTOutput("cum_cld_table"))
+    )
   ),
 
   # ── Tab 5: Jednoduchý test ──
@@ -272,12 +297,20 @@ ui <- page_navbar(
     uiOutput("final_overdisp_summary"),
     card(card_header("Test: varianta vs konstantní model"),
          verbatimTextOutput("final_ftest")),
-    card(card_header("Predikované průměry (emmeans) a statistické skupiny (CLD)"),
-         DTOutput("final_cld_table")),
+    conditionalPanel(
+      condition = "input.contrast_mode == 'allpairs'",
+      card(card_header("Predikované průměry (emmeans) a statistické skupiny (CLD)"),
+           DTOutput("final_cld_table"))
+    ),
     card(card_header("Kontrasty variant (rozdíly + adjustované CI)"),
-         DTOutput("final_posthoc_table")),
-    card(card_header("Kontrasty proti kontrole (Dunnett)"),
-         DTOutput("dunnett_final_table"))
+         conditionalPanel(
+           condition = "input.contrast_mode == 'allpairs'",
+           DTOutput("final_posthoc_table")
+         ),
+         conditionalPanel(
+           condition = "input.contrast_mode == 'dunnett'",
+           DTOutput("dunnett_final_table")
+         ))
   ),
 
   # ── Tab 6: Výsledky a grafy ──
@@ -289,7 +322,7 @@ ui <- page_navbar(
       card_header("Celková vzcházivost dle varianty (jednoduchý test)"),
       p(class = "text-muted",
         "Modelové odhady (emmeans) z GLM na posledním datu. ",
-        "Písmenka = statistické skupiny z jednoduchého testu (záložka 4)."),
+        "Písmenka: v režimu CLD = statistické skupiny, v režimu Dunnett = a (jako kontrola), b (lepší), c (horší)."),
       bslib::accordion(
         open = FALSE,
         bslib::accordion_panel("Upravit popisky grafu",
@@ -301,27 +334,42 @@ ui <- page_navbar(
       ),
       plotOutput("final_bar_plot", height = "550px")
     ),
-    card(full_screen = TRUE,
-        card_header("Jednoduchý test — matice signifikance kontrastů"),
-        p(class = "text-muted", "Zelená = bez průkazného rozdílu po korekci, červená = průkazný rozdíl."),
-        plotOutput("final_sig_heatmap", height = "650px")
+    conditionalPanel(
+      condition = "input.contrast_mode == 'allpairs'",
+      card(full_screen = TRUE,
+          card_header("Jednoduchý test — matice signifikance kontrastů"),
+          p(class = "text-muted", "Zelená = bez průkazného rozdílu po korekci, červená = průkazný rozdíl."),
+          plotOutput("final_sig_heatmap", height = "650px")
+      )
     ),
-    card(full_screen = TRUE,
-        card_header("Jednoduchý test — forest plot kontrastů"),
-        p(class = "text-muted", "Intervaly kontrastů po korekci; svislá čára v nule = žádný rozdíl."),
-        plotOutput("final_contrast_plot", height = "650px")
+    conditionalPanel(
+      condition = "input.contrast_mode == 'allpairs'",
+      card(full_screen = TRUE,
+          card_header("Jednoduchý test — forest plot kontrastů"),
+          p(class = "text-muted", "Intervaly kontrastů po korekci; svislá čára v nule = žádný rozdíl."),
+          plotOutput("final_contrast_plot", height = "650px")
+      )
     ),
-    card(card_header("Predikované průměry a statistické skupiny (emmeans + CLD) — jednoduchý test"),
-         DTOutput("final_emm_results")),
-    card(card_header("Kontrasty variant — jednoduchý test"),
-         DTOutput("final_posthoc_results")),
+    conditionalPanel(
+      condition = "input.contrast_mode == 'allpairs'",
+      card(card_header("Predikované průměry a statistické skupiny (emmeans + CLD) — jednoduchý test"),
+           DTOutput("final_emm_results"))
+    ),
+    conditionalPanel(
+      condition = "input.contrast_mode == 'allpairs'",
+      card(card_header("Kontrasty variant — jednoduchý test"),
+           DTOutput("final_posthoc_results"))
+    ),
     card(full_screen = TRUE,
         card_header("Jednoduchý test — Dunnett forest plot (proti kontrole)"),
         p(class = "text-muted", "Kontrasty kazde varianty jen proti kontrole s Dunnettovou korekci."),
         plotOutput("dunnett_final_contrast_plot", height = "550px")
     ),
-    card(card_header("Kontrasty proti kontrole (Dunnett) — jednoduchý test"),
-         DTOutput("dunnett_final_results")),
+    conditionalPanel(
+      condition = "input.contrast_mode == 'dunnett'",
+      card(card_header("Kontrasty proti kontrole (Dunnett) — jednoduchý test"),
+           DTOutput("dunnett_final_results"))
+    ),
 
     # ── Graf 2: Postup klíčivosti v čase + tabulky ──
     card(full_screen = TRUE,
@@ -340,31 +388,46 @@ ui <- page_navbar(
       ),
       plotOutput("timeline_plot", height = "550px")
     ),
-    card(full_screen = TRUE,
-        card_header("Kumulativní model — matice signifikance kontrastů"),
-        p(class = "text-muted", "Fasetová matice podle dat; zelená = bez rozdílu, červená = rozdíl."),
-        plotOutput("cum_sig_heatmap", height = "650px")
-    ),
+    conditionalPanel(
+      condition = "input.contrast_mode == 'allpairs'",
       card(full_screen = TRUE,
-        card_header("Kumulativní model — forest plot kontrastů"),
-        p(class = "text-muted", "Kontrasty mezi variantami v jednotlivých datech s adjustovanými intervaly."),
-        plotOutput("cum_contrast_plot", height = "650px")
+          card_header("Kumulativní model — matice signifikance kontrastů"),
+          p(class = "text-muted", "Fasetová matice podle dat; zelená = bez rozdílu, červená = rozdíl."),
+          plotOutput("cum_sig_heatmap", height = "650px")
+      )
+    ),
+    conditionalPanel(
+      condition = "input.contrast_mode == 'allpairs'",
+      card(full_screen = TRUE,
+          card_header("Kumulativní model — forest plot kontrastů"),
+          p(class = "text-muted", "Kontrasty mezi variantami v jednotlivých datech s adjustovanými intervaly."),
+          plotOutput("cum_contrast_plot", height = "650px")
+      )
     ),
     card(card_header("Souhrnná kumulativní vzcházivost varianty (průměr přes časy, orientační)"),
          p(class = "text-muted small", "Jedna hodnota na variantu — průměr modelových odhadů přes data měření. ",
            "Sloupec n_times = přes kolik časů se průměrovalo."),
          DTOutput("cum_emm_results")),
-    card(card_header("Statistické skupiny po jednotlivých datech (CLD, orientační)"),
-         DTOutput("cum_cld_results")),
-    card(card_header("Kontrasty variant — kumulativní model (orientační)"),
-         DTOutput("cum_posthoc_results")),
+    conditionalPanel(
+      condition = "input.contrast_mode == 'allpairs'",
+      card(card_header("Statistické skupiny po jednotlivých datech (CLD, orientační)"),
+           DTOutput("cum_cld_results"))
+    ),
+    conditionalPanel(
+      condition = "input.contrast_mode == 'allpairs'",
+      card(card_header("Kontrasty variant — kumulativní model (orientační)"),
+           DTOutput("cum_posthoc_results"))
+    ),
     card(full_screen = TRUE,
         card_header("Kumulativní model — Dunnett forest plot (proti kontrole)"),
         p(class = "text-muted", "Kontrasty proti kontrole v jednotlivych datech s Dunnettovou korekci (orientacni)."),
         plotOutput("dunnett_cum_contrast_plot", height = "650px")
     ),
-    card(card_header("Kontrasty proti kontrole (Dunnett) — kumulativní model (orientační)"),
-         DTOutput("dunnett_cum_results")),
+    conditionalPanel(
+      condition = "input.contrast_mode == 'dunnett'",
+      card(card_header("Kontrasty proti kontrole (Dunnett) — kumulativní model (orientační)"),
+           DTOutput("dunnett_cum_results"))
+    ),
 
     # ── Graf 3: Podmíněná pravděpodobnost + tabulky ──
     card(full_screen = TRUE,
@@ -384,31 +447,46 @@ ui <- page_navbar(
       ),
       plotOutput("main_plot", height = "600px")
     ),
-    card(full_screen = TRUE,
-        card_header("Podmíněný model — matice signifikance kontrastů"),
-        p(class = "text-muted", "Fasetová matice podle dat; vychází přímo z adjustovaných párových kontrastů."),
-        plotOutput("cond_sig_heatmap", height = "650px")
-    ),
+    conditionalPanel(
+      condition = "input.contrast_mode == 'allpairs'",
       card(full_screen = TRUE,
-        card_header("Podmíněný model — forest plot kontrastů"),
-        p(class = "text-muted", "Kontrasty mezi variantami v jednotlivých datech s adjustovanými intervaly."),
-        plotOutput("cond_contrast_plot", height = "650px")
+          card_header("Podmíněný model — matice signifikance kontrastů"),
+          p(class = "text-muted", "Fasetová matice podle dat; vychází přímo z adjustovaných párových kontrastů."),
+          plotOutput("cond_sig_heatmap", height = "650px")
+      )
+    ),
+    conditionalPanel(
+      condition = "input.contrast_mode == 'allpairs'",
+      card(full_screen = TRUE,
+          card_header("Podmíněný model — forest plot kontrastů"),
+          p(class = "text-muted", "Kontrasty mezi variantami v jednotlivých datech s adjustovanými intervaly."),
+          plotOutput("cond_contrast_plot", height = "650px")
+      )
     ),
     card(card_header("Souhrnný odhad varianty — podmíněný model (průměr přes časy)"),
          p(class = "text-muted small", "Jedna hodnota na variantu — průměr modelových odhadů přes data měření. ",
            "Sloupec n_times = přes kolik časů se průměrovalo (saturované varianty mohou mít méně)."),
          DTOutput("emm_results")),
-    card(card_header("Statistické skupiny po jednotlivých datech (CLD) — podmíněný model"),
-         DTOutput("cld_results")),
-    card(card_header("Kontrasty variant — podmíněný model"),
-         DTOutput("posthoc_results")),
+    conditionalPanel(
+      condition = "input.contrast_mode == 'allpairs'",
+      card(card_header("Statistické skupiny po jednotlivých datech (CLD) — podmíněný model"),
+           DTOutput("cld_results"))
+    ),
+    conditionalPanel(
+      condition = "input.contrast_mode == 'allpairs'",
+      card(card_header("Kontrasty variant — podmíněný model"),
+           DTOutput("posthoc_results"))
+    ),
     card(full_screen = TRUE,
         card_header("Podmíněný model — Dunnett forest plot (proti kontrole)"),
         p(class = "text-muted", "Kontrasty kazde varianty proti kontrole s Dunnettovou korekci."),
         plotOutput("dunnett_cond_contrast_plot", height = "650px")
     ),
-    card(card_header("Kontrasty proti kontrole (Dunnett) — podmíněný model"),
-         DTOutput("dunnett_cond_results")),
+    conditionalPanel(
+      condition = "input.contrast_mode == 'dunnett'",
+      card(card_header("Kontrasty proti kontrole (Dunnett) — podmíněný model"),
+           DTOutput("dunnett_cond_results"))
+    ),
 
     # ── Graf 4: Teplotní mapa ──
     card(full_screen = TRUE,
@@ -502,6 +580,101 @@ server <- function(input, output, session) {
       adjust = "dunnettx"
     ))
     standardize_interval_cols(out)
+  }
+
+  # Dunnett letter assignment: a = same as control, b = better, c = worse
+  make_dunnett_letters <- function(dunnett_df, emm_df, control_name, alpha) {
+    if (is.null(dunnett_df) || nrow(dunnett_df) == 0) return(NULL)
+
+    # Get control estimate on response scale
+    ctrl_row <- emm_df[emm_df$treatment == control_name, , drop = FALSE]
+    if (nrow(ctrl_row) == 0) return(NULL)
+    ctrl_prob <- ctrl_row$prob[1]
+
+    has_time <- "time" %in% names(dunnett_df)
+    
+    # Parse contrast names to get treatment names
+    results <- list()
+    
+    if (has_time) {
+      times <- unique(dunnett_df$time)
+      for (tt in times) {
+        sub_d <- dunnett_df[dunnett_df$time == tt, , drop = FALSE]
+        ctrl_prob_t <- emm_df$prob[emm_df$treatment == control_name & emm_df$time == tt][1]
+        
+        letter_rows <- data.frame(
+          treatment = control_name,
+          time = tt,
+          .dunnett_letter = "a",
+          stringsAsFactors = FALSE
+        )
+        
+        for (i in seq_len(nrow(sub_d))) {
+          cname <- as.character(sub_d$contrast[i])
+          # extract treatment name from contrast like "TrtX - Control"
+          parts <- strsplit(cname, " - ", fixed = TRUE)[[1]]
+          trt_name <- trimws(parts[1])
+          # check if this is "Control - TrtX" format instead
+          if (trt_name == control_name && length(parts) >= 2) {
+            trt_name <- trimws(parts[2])
+          }
+          
+          p_val <- sub_d$p.value[i]
+          trt_prob <- emm_df$prob[emm_df$treatment == trt_name & emm_df$time == tt]
+          if (length(trt_prob) == 0) trt_prob <- NA
+          trt_prob <- trt_prob[1]
+          
+          if (is.na(p_val) || p_val >= alpha) {
+            ltr <- "a"
+          } else if (!is.na(trt_prob) && trt_prob > ctrl_prob_t) {
+            ltr <- "b"
+          } else {
+            ltr <- "c"
+          }
+          
+          letter_rows <- rbind(letter_rows, data.frame(
+            treatment = trt_name, time = tt,
+            .dunnett_letter = ltr, stringsAsFactors = FALSE
+          ))
+        }
+        results[[length(results) + 1]] <- letter_rows
+      }
+      do.call(rbind, results)
+    } else {
+      letter_rows <- data.frame(
+        treatment = control_name,
+        .dunnett_letter = "a",
+        stringsAsFactors = FALSE
+      )
+      
+      for (i in seq_len(nrow(dunnett_df))) {
+        cname <- as.character(dunnett_df$contrast[i])
+        parts <- strsplit(cname, " - ", fixed = TRUE)[[1]]
+        trt_name <- trimws(parts[1])
+        if (trt_name == control_name && length(parts) >= 2) {
+          trt_name <- trimws(parts[2])
+        }
+        
+        p_val <- dunnett_df$p.value[i]
+        trt_prob <- emm_df$prob[emm_df$treatment == trt_name]
+        if (length(trt_prob) == 0) trt_prob <- NA
+        trt_prob <- trt_prob[1]
+        
+        if (is.na(p_val) || p_val >= alpha) {
+          ltr <- "a"
+        } else if (!is.na(trt_prob) && trt_prob > ctrl_prob) {
+          ltr <- "b"
+        } else {
+          ltr <- "c"
+        }
+        
+        letter_rows <- rbind(letter_rows, data.frame(
+          treatment = trt_name,
+          .dunnett_letter = ltr, stringsAsFactors = FALSE
+        ))
+      }
+      letter_rows
+    }
   }
 
   make_cld_table <- function(emm_obj, adjust_method, alpha, scale = "link") {
@@ -1442,6 +1615,8 @@ server <- function(input, output, session) {
 
   output$posthoc_info <- renderUI({
     req(rv$best_model)
+    is_dunnett <- identical(input$contrast_mode, "dunnett")
+    
     txt <- if (rv$best_model == "M3") {
       "Interakce mezi datem a variantou byla uznána za důležitou; tabulka níže ukazuje kontrasty mezi variantami v každém datu."
     } else {
@@ -1453,11 +1628,17 @@ server <- function(input, output, session) {
     } else {
       "Inference běží na response scale (experimentální)."
     }
+    
+    method_txt <- if (is_dunnett) {
+      sprintf("Dunnett (kontrasty proti kontrole: %s).", input$control_variant)
+    } else {
+      paste0("Všechny páry (s korekcí metodou ", input$p_method, ").")
+    }
 
     tagList(
       div(class = "alert alert-info",
-          tags$strong("Přístup: "), txt,
-          paste0(" (s uvažovanou kompenzí testů metodou ", input$p_method, ").")
+          tags$strong("Přístup: "), txt, " ",
+          tags$strong("Metoda: "), method_txt
       ),
       tags$br(),
       tags$small(infer_txt)
@@ -1599,10 +1780,18 @@ server <- function(input, output, session) {
   })
 
 	output$final_bar_plot <- renderPlot({
-	  req(rv$full_data, rv$final_cld, rv$final_M1)
+	  req(rv$full_data, rv$final_M1)
+	  
+	  is_dunnett <- identical(input$contrast_mode, "dunnett")
+	  
+	  # In allpairs mode, require CLD; in dunnett mode, require dunnett results
+	  if (is_dunnett) {
+	    req(rv$dunnett_final_posthoc)
+	  } else {
+	    req(rv$final_cld)
+	  }
 
 	  dat <- rv$full_data
-	  cld_df <- rv$final_cld
 	  band_df <- rv$final_group_band
 	  ci_pct <- round((1 - input$alpha) * 100)
 
@@ -1625,17 +1814,34 @@ server <- function(input, output, session) {
 	    stringsAsFactors = FALSE
 	  )
 
-	  # add CLD letters separately
-	  letter_df <- data.frame(
-	    treatment = cld_df$treatment,
-	    letter = trimws(cld_df$.group),
-	    stringsAsFactors = FALSE
-	  )
+	  # add letters: CLD or Dunnett a/b/c
+	  if (is_dunnett) {
+	    dlett <- make_dunnett_letters(
+	      rv$dunnett_final_posthoc, emm_disp,
+	      input$control_variant, input$alpha
+	    )
+	    if (!is.null(dlett)) {
+	      letter_df <- data.frame(
+	        treatment = dlett$treatment,
+	        letter = dlett$.dunnett_letter,
+	        stringsAsFactors = FALSE
+	      )
+	    } else {
+	      letter_df <- data.frame(treatment = plot_data$treatment, letter = "", stringsAsFactors = FALSE)
+	    }
+	  } else {
+	    cld_df <- rv$final_cld
+	    letter_df <- data.frame(
+	      treatment = cld_df$treatment,
+	      letter = trimws(cld_df$.group),
+	      stringsAsFactors = FALSE
+	    )
+	  }
 
 	  plot_data <- dplyr::left_join(plot_data, letter_df, by = "treatment")
 
-	  # add grouping bands if available
-	  if (!is.null(band_df)) {
+	  # add grouping bands if available and not in dunnett mode
+	  if (!is_dunnett && !is.null(band_df)) {
 	    band_keep <- band_df[, intersect(c("treatment", "band.LCL", "band.UCL"), names(band_df)), drop = FALSE]
 
 	    if (all(c("treatment", "band.LCL", "band.UCL") %in% names(band_keep))) {
@@ -1650,16 +1856,26 @@ server <- function(input, output, session) {
 
 	  plot_data$label_y <- plot_data$ci_hi + 2
 
-	if (isTRUE(input$show_group_bands) &&
+	if (!is_dunnett && isTRUE(input$show_group_bands) &&
 	    all(c("band.LCL", "band.UCL") %in% names(plot_data))) {
 	  plot_data$label_y <- pmax(plot_data$ci_hi, plot_data$band.UCL, na.rm = TRUE) + 2
+	}
+
+	# Colour letters for Dunnett mode
+	if (is_dunnett) {
+	  plot_data$letter_colour <- ifelse(
+	    plot_data$letter == "a", "#1b7837",
+	    ifelse(plot_data$letter == "b", "#2166ac", "#c0392b")
+	  )
+	} else {
+	  plot_data$letter_colour <- "black"
 	}
 
 	g <- ggplot(plot_data, aes(x = treatment, y = mean_pct, fill = treatment)) +
 	  geom_col(alpha = 0.85, width = 0.7) +
 	  geom_errorbar(aes(ymin = ci_lo, ymax = ci_hi), width = 0.25, linewidth = 0.8)
 
-	if (isTRUE(input$show_group_bands) &&
+	if (!is_dunnett && isTRUE(input$show_group_bands) &&
 	    all(c("band.LCL", "band.UCL") %in% names(plot_data))) {
 	  g <- g + geom_errorbar(
 	    aes(ymin = band.LCL, ymax = band.UCL),
@@ -1667,9 +1883,22 @@ server <- function(input, output, session) {
 	  )
 	}
 
+	# Default subtitle
+	if (is_dunnett) {
+	  ctrl <- input$control_variant
+	  sub_default <- sprintf(
+	    "Dunnett vs %s: a = jako kontrola, b = lepší, c = horší. %d%% CI.",
+	    ctrl, ci_pct
+	  )
+	} else if (isTRUE(input$show_group_bands)) {
+	  sub_default <- sprintf("Silné úsečky = %d%% CI, tenké přerušované = simultánní grouping bands, písmenka = CLD.", ci_pct)
+	} else {
+	  sub_default <- sprintf("Modelové odhady (emmeans) ± %d%% CI. Písmenka = statistické skupiny.", ci_pct)
+	}
+
 	g +
 	  geom_text(aes(label = letter, y = label_y),
-		    size = 5, fontface = "bold", vjust = 0) +
+		    size = 5, fontface = "bold", vjust = 0, colour = plot_data$letter_colour) +
 	    geom_text(aes(label = sprintf("%.1f%%", mean_pct)),
 		      vjust = -0.5, size = 3.5, colour = "grey30") +
 	    scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.18))) +
@@ -1677,14 +1906,7 @@ server <- function(input, output, session) {
 	      x = lbl("lbl_bar_x", NULL),
 	      y = lbl("lbl_bar_y", "Vzcházivost (%)"),
 	      title = lbl("lbl_bar_title", sprintf("Celková vzcházivost v posledním datu (%s)", last_time)),
-	      subtitle = lbl(
-		"lbl_bar_subtitle",
-		if (isTRUE(input$show_group_bands)) {
-		  sprintf("Silné úsečky = %d%% CI, tenké přerušované = simultánní grouping bands, písmenka = CLD.", ci_pct)
-		} else {
-		  sprintf("Modelové odhady (emmeans) ± %d%% CI. Písmenka = statistické skupiny.", ci_pct)
-		}
-	      )
+	      subtitle = lbl("lbl_bar_subtitle", sub_default)
 	    ) +
 	    theme_minimal(base_size = 14) +
 	    theme(
