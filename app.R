@@ -79,6 +79,15 @@ ui <- page_navbar(
         "Model scale = statisticky standardní a nejlépe odpovídá inferenci modelu. ",
         "Response scale = interpretačně přirozenější, ale experimentální a méně statisticky přesné. Contrasts i CLD se mohou lišit od standardního modelového pohledu."
       ),
+	checkboxInput(
+		  "show_group_bands",
+		  "Zobrazit grouping bands (simultánní intervaly)",
+		  value = TRUE
+		),
+		p(class = "text-muted small",
+		  "Tenké přerušované úsečky = simultánní intervaly pro celou rodinu odhadů. ",
+		  "Mají lépe odpovídat CLD než běžné CI, ale nejsou s CLD úplně ekvivalentní."
+	),
       selectInput("model_choice", "Volba modelu (interakce)",
                   choices = c("Automaticky (dle testu)" = "auto",
                               "Vždy s interakcí (varianta × čas)" = "M3",
@@ -452,6 +461,25 @@ server <- function(input, output, session) {
     out
   }
 
+	make_group_band_table <- function(emm_obj, conf_level, scale = "link") {
+	  if (identical(scale, "response")) {
+	    obj <- regrid(emm_obj, transform = "response")
+	    out <- as.data.frame(confint(obj, adjust = "mvt", level = conf_level))
+	  } else {
+	    out <- as.data.frame(confint(
+	      emm_obj,
+	      adjust = "mvt",
+	      level = conf_level,
+	      type = "response"
+	    ))
+	  }
+
+	  out <- standardize_interval_cols(out)
+	  names(out)[names(out) == "lower.CL"] <- "band.LCL"
+	  names(out)[names(out) == "upper.CL"] <- "band.UCL"
+	  out
+	}
+
   extract_contrast_pairs <- function(df) {
     if (!"contrast" %in% names(df) || nrow(df) == 0) return(df)
     pair_mat <- t(vapply(
@@ -607,7 +635,10 @@ server <- function(input, output, session) {
     cum_model = NULL, cum_emm = NULL, cum_posthoc = NULL, cum_cld = NULL,
     emm_marginal = NULL, cum_emm_marginal = NULL,
     aic_bic = NULL,
-    log = ""
+    log = "",
+    emm_group_band = NULL,
+    final_group_band = NULL,
+    cum_group_band = NULL,
   )
 
   add_log <- function(...) {
@@ -626,6 +657,9 @@ server <- function(input, output, session) {
     rv$cum_model <- NULL; rv$cum_emm <- NULL; rv$cum_posthoc <- NULL; rv$cum_cld <- NULL
     rv$emm_marginal <- NULL; rv$cum_emm_marginal <- NULL
     rv$aic_bic <- NULL
+    rv$emm_group_band <- NULL
+    rv$final_group_band <- NULL
+    rv$cum_group_band <- NULL
   }
 
   uploaded <- reactiveVal(NULL)
@@ -953,16 +987,18 @@ server <- function(input, output, session) {
       mod <- if (rv$best_model == "M3") rv$M3 else rv$M2
       conf_level <- 1 - input$alpha
 
-      if (rv$best_model == "M3") {
-        emm_main <- emmeans(mod, ~ treatment | time)
-        rv$posthoc <- make_contrast_table(emm_main, input$p_method, conf_level, input$infer_scale)
-        rv$emm_plot <- as.data.frame(summary(emm_main, type = "response", level = conf_level))
-      } else {
-        emm_main <- emmeans(mod, ~ treatment)
-        rv$posthoc <- make_contrast_table(emm_main, input$p_method, conf_level, input$infer_scale)
-        emm_time <- emmeans(mod, ~ treatment + time)
-        rv$emm_plot <- as.data.frame(summary(emm_time, type = "response", level = conf_level))
-      }
+	if (rv$best_model == "M3") {
+	  emm_main <- emmeans(mod, ~ treatment | time)
+	  rv$posthoc <- make_contrast_table(emm_main, input$p_method, conf_level, input$infer_scale)
+	  rv$emm_plot <- as.data.frame(summary(emm_main, type = "response", level = conf_level))
+	  rv$emm_group_band <- make_group_band_table(emm_main, conf_level, input$infer_scale)
+	} else {
+	  emm_main <- emmeans(mod, ~ treatment)
+	  rv$posthoc <- make_contrast_table(emm_main, input$p_method, conf_level, input$infer_scale)
+	  emm_time <- emmeans(mod, ~ treatment + time)
+	  rv$emm_plot <- as.data.frame(summary(emm_time, type = "response", level = conf_level))
+	  rv$emm_group_band <- make_group_band_table(emm_main, conf_level, input$infer_scale)
+	}
       
       rv$cld_df <- NULL
       tryCatch({
@@ -1042,7 +1078,10 @@ server <- function(input, output, session) {
 
         tryCatch({
           emm_final <- emmeans(rv$final_M1, ~ treatment)
-          rv$final_posthoc <- make_contrast_table(emm_final, input$p_method, conf_level, input$infer_scale)
+          rv$final_group_band <- make_group_band_table(
+  		emm_final, conf_level, input$infer_scale
+	  )
+	  rv$final_posthoc <- make_contrast_table(emm_final, input$p_method, conf_level, input$infer_scale)
           rv$final_cld <- make_cld_table(emm_final, input$p_method, input$alpha, input$infer_scale)
           add_log("\u2713 Final CLD + post-hoc computed on ", input$infer_scale, " scale")
         }, error = function(e) {
@@ -1065,7 +1104,10 @@ server <- function(input, output, session) {
         rv$cum_model <- glm(cbind(cumulative, N - cumulative) ~ treatment * time, family = fam, data = full)
 
         cum_emm <- emmeans(rv$cum_model, ~ treatment | time)
-        rv$cum_emm <- as.data.frame(summary(cum_emm, type = "response", level = conf_level))
+        rv$cum_group_band <- make_group_band_table(
+ 		 cum_emm, conf_level, input$infer_scale
+	)
+	rv$cum_emm <- as.data.frame(summary(cum_emm, type = "response", level = conf_level))
         rv$cum_posthoc <- make_contrast_table(cum_emm, input$p_method, conf_level, input$infer_scale)
 
         tryCatch({
@@ -1460,83 +1502,197 @@ server <- function(input, output, session) {
       formatRound(columns = nums, digits = 4)
   })
 
-  output$final_bar_plot <- renderPlot({
-    req(rv$full_data, rv$final_cld)
-    dat <- rv$full_data; N <- input$N_seeds
-    cld_df <- rv$final_cld
-    ci_pct <- round((1 - input$alpha) * 100)
+	output$final_bar_plot <- renderPlot({
+	  req(rv$full_data, rv$final_cld, rv$final_M1)
 
-    plot_data <- data.frame(
-      treatment = cld_df$treatment,
-      mean_pct = cld_df$prob * 100,
-      ci_lo = cld_df$asymp.LCL * 100,
-      ci_hi = cld_df$asymp.UCL * 100,
-      letter = trimws(cld_df$.group),
-      stringsAsFactors = FALSE
-    )
-    plot_data$treatment <- factor(plot_data$treatment, levels = rv$treatment_order)
+	  dat <- rv$full_data
+	  cld_df <- rv$final_cld
+	  band_df <- rv$final_group_band
+	  ci_pct <- round((1 - input$alpha) * 100)
 
-    last_time <- levels(dat$time)[length(levels(dat$time))]
+	  # always get displayed means on response scale
+	  emm_disp <- as.data.frame(
+	    summary(
+	      emmeans(rv$final_M1, ~ treatment),
+	      type = "response",
+	      level = 1 - input$alpha
+	    )
+	  )
 
-    ggplot(plot_data, aes(x = treatment, y = mean_pct, fill = treatment)) +
-      geom_col(alpha = 0.85, width = 0.7) +
-      geom_errorbar(aes(ymin = ci_lo, ymax = ci_hi), width = 0.25, linewidth = 0.8) +
-      geom_text(aes(label = letter, y = ci_hi + 2), size = 5, fontface = "bold", vjust = 0) +
-      geom_text(aes(label = sprintf("%.1f%%", mean_pct)), vjust = -0.5, size = 3.5, colour = "grey30") +
-      scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.15))) +
-      labs(x = lbl("lbl_bar_x", NULL),
-           y = lbl("lbl_bar_y", "Vzcházivost (%)"),
-           title = lbl("lbl_bar_title", sprintf("Celková vzcházivost v posledním datu (%s)", last_time)),
-           subtitle = lbl("lbl_bar_subtitle", sprintf("Modelové odhady (emmeans) \u00B1 %d%% CI. Písmenka = statistické skupiny.", ci_pct))) +
-      theme_minimal(base_size = 14) +
-      theme(legend.position = "none",
-            plot.title = element_text(face = "bold", size = 18),
-            plot.subtitle = element_text(colour = "grey50", size = 12),
-            axis.text.x = element_text(size = 12, face = "bold"),
-            panel.grid.major.x = element_blank())
-  })
+	  emm_disp <- standardize_interval_cols(emm_disp)
 
-  output$main_plot <- renderPlot({
-    req(rv$emm_plot); df <- rv$emm_plot
-    ci_pct <- round((1 - input$alpha) * 100)
+	  plot_data <- data.frame(
+	    treatment = emm_disp$treatment,
+	    mean_pct = emm_disp$prob * 100,
+	    ci_lo = emm_disp$lower.CL * 100,
+	    ci_hi = emm_disp$upper.CL * 100,
+	    stringsAsFactors = FALSE
+	  )
 
-    df$treatment <- factor(df$treatment, levels = rv$treatment_order)
+	  # add CLD letters separately
+	  letter_df <- data.frame(
+	    treatment = cld_df$treatment,
+	    letter = trimws(cld_df$.group),
+	    stringsAsFactors = FALSE
+	  )
 
-    if (!"time" %in% names(df)) {
-      ggplot(df, aes(x = treatment, y = prob, fill = treatment)) +
-        geom_col(width = 0.7, alpha = 0.85) +
-        geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL), width = 0.25) +
-        scale_y_continuous(labels = scales::percent_format()) +
-        labs(x = lbl("lbl_emm_x", NULL),
-             y = lbl("lbl_emm_y", "Pravděpodobnost klíčení"),
-             title = lbl("lbl_emm_title", "Odhady pravděpodobností klíčení dle varianty"),
-             subtitle = lbl("lbl_emm_subtitle", sprintf("Chybové úsečky = %d%% interval spolehlivosti", ci_pct))) +
-        theme_minimal(base_size = 14) +
-        theme(legend.position = "none",
-              axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
-              plot.title = element_text(face = "bold", size = 16),
-              plot.subtitle = element_text(colour = "grey50"),
-              panel.grid.major.x = element_blank())
-    } else {
-      ggplot(df, aes(x = treatment, y = prob, fill = time)) +
-        geom_col(position = position_dodge(width = 0.8), width = 0.7, alpha = 0.85) +
-        geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL),
-                      position = position_dodge(width = 0.8), width = 0.25) +
-        scale_y_continuous(labels = scales::percent_format()) +
-        scale_fill_brewer(palette = "Set2") +
-        labs(x = lbl("lbl_emm_x", NULL),
-             y = lbl("lbl_emm_y", "Podmíněná pravděpodobnost klíčení"),
-             fill = lbl("lbl_emm_legend", "Datum"),
-             title = lbl("lbl_emm_title", "Podmíněná pravděpodobnost klíčení"),
-             subtitle = lbl("lbl_emm_subtitle", sprintf("Odhady pravděpodobností klíčení dle varianty a data (%d%% CI)", ci_pct))) +
-        theme_minimal(base_size = 14) +
-        theme(axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
-              plot.title = element_text(face = "bold", size = 16),
-              plot.subtitle = element_text(colour = "grey50"),
-              legend.position = "top",
-              panel.grid.major.x = element_blank())
-    }
-  })
+	  plot_data <- dplyr::left_join(plot_data, letter_df, by = "treatment")
+
+	  # add grouping bands if available
+	  if (!is.null(band_df)) {
+	    band_keep <- band_df[, intersect(c("treatment", "band.LCL", "band.UCL"), names(band_df)), drop = FALSE]
+
+	    if (all(c("treatment", "band.LCL", "band.UCL") %in% names(band_keep))) {
+	      plot_data <- dplyr::left_join(plot_data, band_keep, by = "treatment")
+	      plot_data$band.LCL <- plot_data$band.LCL * 100
+	      plot_data$band.UCL <- plot_data$band.UCL * 100
+	    }
+	  }
+
+	  plot_data$treatment <- factor(plot_data$treatment, levels = rv$treatment_order)
+	  last_time <- levels(dat$time)[length(levels(dat$time))]
+
+	  plot_data$label_y <- plot_data$ci_hi + 2
+
+	if (isTRUE(input$show_group_bands) &&
+	    all(c("band.LCL", "band.UCL") %in% names(plot_data))) {
+	  plot_data$label_y <- pmax(plot_data$ci_hi, plot_data$band.UCL, na.rm = TRUE) + 2
+	}
+
+	g <- ggplot(plot_data, aes(x = treatment, y = mean_pct, fill = treatment)) +
+	  geom_col(alpha = 0.85, width = 0.7) +
+	  geom_errorbar(aes(ymin = ci_lo, ymax = ci_hi), width = 0.25, linewidth = 0.8)
+
+	if (isTRUE(input$show_group_bands) &&
+	    all(c("band.LCL", "band.UCL") %in% names(plot_data))) {
+	  g <- g + geom_errorbar(
+	    aes(ymin = band.LCL, ymax = band.UCL),
+	    width = 0.42, linewidth = 0.5, linetype = 2, colour = "black"
+	  )
+	}
+
+	g +
+	  geom_text(aes(label = letter, y = label_y),
+		    size = 5, fontface = "bold", vjust = 0) +
+	    geom_text(aes(label = sprintf("%.1f%%", mean_pct)),
+		      vjust = -0.5, size = 3.5, colour = "grey30") +
+	    scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.18))) +
+	    labs(
+	      x = lbl("lbl_bar_x", NULL),
+	      y = lbl("lbl_bar_y", "Vzcházivost (%)"),
+	      title = lbl("lbl_bar_title", sprintf("Celková vzcházivost v posledním datu (%s)", last_time)),
+	      subtitle = lbl(
+		"lbl_bar_subtitle",
+		if (isTRUE(input$show_group_bands)) {
+		  sprintf("Silné úsečky = %d%% CI, tenké přerušované = simultánní grouping bands, písmenka = CLD.", ci_pct)
+		} else {
+		  sprintf("Modelové odhady (emmeans) ± %d%% CI. Písmenka = statistické skupiny.", ci_pct)
+		}
+	      )
+	    ) +
+	    theme_minimal(base_size = 14) +
+	    theme(
+	      legend.position = "none",
+	      plot.title = element_text(face = "bold", size = 18),
+	      plot.subtitle = element_text(colour = "grey50", size = 12),
+	      axis.text.x = element_text(size = 12, face = "bold"),
+	      panel.grid.major.x = element_blank()
+	    )
+	})
+  
+	output$main_plot <- renderPlot({
+	  req(rv$emm_plot)
+	  df <- rv$emm_plot
+	  band_df <- rv$emm_group_band
+	  ci_pct <- round((1 - input$alpha) * 100)
+
+	  df$treatment <- factor(df$treatment, levels = rv$treatment_order)
+
+	  if (!is.null(band_df)) {
+	    join_keys <- intersect(c("treatment", "time"), names(df))
+	    band_keep <- band_df[, intersect(c("treatment", "time", "band.LCL", "band.UCL"), names(band_df)), drop = FALSE]
+	    df <- dplyr::left_join(df, band_keep, by = join_keys)
+	  }
+
+	  if (!"time" %in% names(df)) {
+	    g <- ggplot(df, aes(x = treatment, y = prob, fill = treatment)) +
+	      geom_col(width = 0.7, alpha = 0.85) +
+	      geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL), width = 0.25, linewidth = 0.8)
+
+	    if (isTRUE(input$show_group_bands) &&
+		all(c("band.LCL", "band.UCL") %in% names(df))) {
+	      g <- g + geom_errorbar(
+		aes(ymin = band.LCL, ymax = band.UCL),
+		width = 0.42, linewidth = 0.5, linetype = 2, colour = "black"
+	      )
+	    }
+
+	    g +
+	      scale_y_continuous(labels = scales::percent_format()) +
+	      labs(
+		x = lbl("lbl_emm_x", NULL),
+		y = lbl("lbl_emm_y", "Pravděpodobnost klíčení"),
+		title = lbl("lbl_emm_title", "Odhady pravděpodobností klíčení dle varianty"),
+		subtitle = lbl(
+		  "lbl_emm_subtitle",
+		  if (isTRUE(input$show_group_bands)) {
+		    sprintf("Silné úsečky = %d%% CI, tenké přerušované = simultánní grouping bands", ci_pct)
+		  } else {
+		    sprintf("Chybové úsečky = %d%% interval spolehlivosti", ci_pct)
+		  }
+		)
+	      ) +
+	      theme_minimal(base_size = 14) +
+	      theme(
+		legend.position = "none",
+		axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
+		plot.title = element_text(face = "bold", size = 16),
+		plot.subtitle = element_text(colour = "grey50"),
+		panel.grid.major.x = element_blank()
+	      )
+	  } else {
+	    dodge <- position_dodge(width = 0.8)
+
+	    g <- ggplot(df, aes(x = treatment, y = prob, fill = time)) +
+	      geom_col(position = dodge, width = 0.7, alpha = 0.85) +
+	      geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL),
+			    position = dodge, width = 0.25, linewidth = 0.8)
+
+	    if (isTRUE(input$show_group_bands) &&
+		all(c("band.LCL", "band.UCL") %in% names(df))) {
+	      g <- g + geom_errorbar(
+		aes(ymin = band.LCL, ymax = band.UCL),
+		position = dodge, width = 0.42, linewidth = 0.5, linetype = 2, colour = "black"
+	      )
+	    }
+
+	    g +
+	      scale_y_continuous(labels = scales::percent_format()) +
+	      scale_fill_brewer(palette = "Set2") +
+	      labs(
+		x = lbl("lbl_emm_x", NULL),
+		y = lbl("lbl_emm_y", "Podmíněná pravděpodobnost klíčení"),
+		fill = lbl("lbl_emm_legend", "Datum"),
+		title = lbl("lbl_emm_title", "Podmíněná pravděpodobnost klíčení"),
+		subtitle = lbl(
+		  "lbl_emm_subtitle",
+		  if (isTRUE(input$show_group_bands)) {
+		    sprintf("Odhady dle varianty a data: silné = %d%% CI, tenké přerušované = simultánní grouping bands", ci_pct)
+		  } else {
+		    sprintf("Odhady pravděpodobností klíčení dle varianty a data (%d%% CI)", ci_pct)
+		  }
+		)
+	      ) +
+	      theme_minimal(base_size = 14) +
+	      theme(
+		axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
+		plot.title = element_text(face = "bold", size = 16),
+		plot.subtitle = element_text(colour = "grey50"),
+		legend.position = "top",
+		panel.grid.major.x = element_blank()
+	      )
+	  }
+	})
 
   output$timeline_plot <- renderPlot({
     req(rv$full_data)
@@ -1551,43 +1707,59 @@ server <- function(input, output, session) {
         ci_hi = rv$cum_emm$asymp.UCL * 100,
         stringsAsFactors = FALSE
       )
-      sub_default <- sprintf("Modelové odhady (emmeans) \u00B1 %d%% CI — orientační (korelovaná data)", ci_pct)
-    } else {
-      dat <- rv$full_data; N <- input$N_seeds
-      z_crit <- qnorm(1 - input$alpha / 2)
-      timeline <- dat %>%
-        group_by(treatment, time) %>%
-        summarise(
-          mean_pct = mean(cumulative / N * 100),
-          se = sd(cumulative / N * 100) / sqrt(n()),
-          .groups = "drop"
-        ) %>%
-        mutate(ci_lo = pmax(0, mean_pct - z_crit * se),
-               ci_hi = pmin(100, mean_pct + z_crit * se))
-      sub_default <- sprintf("Surová data, průměr \u00B1 %d%% CI", ci_pct)
+
+      if (!is.null(rv$cum_group_band)) {
+        band_keep <- rv$cum_group_band[, intersect(c("treatment", "time", "band.LCL", "band.UCL"), names(rv$cum_group_band)), drop = FALSE]
+        timeline <- dplyr::left_join(timeline, band_keep, by = c("treatment", "time"))
+        if ("band.LCL" %in% names(timeline)) timeline$band.LCL <- timeline$band.LCL * 100
+        if ("band.UCL" %in% names(timeline)) timeline$band.UCL <- timeline$band.UCL * 100
+      }
+
+      sub_default <- if (isTRUE(input$show_group_bands)) {
+        sprintf("Modelové odhady (emmeans) ± %d%% CI + simultánní grouping bands — orientační (korelovaná data)", ci_pct)
+      } else {
+        sprintf("Modelové odhady (emmeans) ± %d%% CI — orientační (korelovaná data)", ci_pct)
+      }
     }
 
     timeline$treatment <- factor(timeline$treatment, levels = rv$treatment_order)
+    dodge <- position_dodge(width = 0.8)
 
-    ggplot(timeline, aes(x = treatment, y = mean_pct, fill = time)) +
-      geom_col(position = position_dodge(width = 0.8), width = 0.7, alpha = 0.85) +
-      geom_errorbar(aes(ymin = ci_lo, ymax = ci_hi),
-                    position = position_dodge(width = 0.8), width = 0.25) +
+    g <- ggplot(timeline, aes(x = treatment, y = mean_pct, fill = time)) +
+      geom_col(position = dodge, width = 0.7, alpha = 0.85) +
+      geom_errorbar(
+        aes(ymin = ci_lo, ymax = ci_hi),
+        position = dodge, width = 0.25, linewidth = 0.8
+      )
+
+    if (isTRUE(input$show_group_bands) &&
+        all(c("band.LCL", "band.UCL") %in% names(timeline))) {
+      g <- g + geom_errorbar(
+        aes(ymin = band.LCL, ymax = band.UCL),
+        position = dodge, width = 0.42, linewidth = 0.5,
+        linetype = 2, colour = "black"
+      )
+    }
+
+    g +
       scale_y_continuous(limits = c(0, 105), expand = expansion(mult = c(0, 0))) +
       scale_fill_brewer(palette = "Set2") +
-      labs(x = lbl("lbl_time_x", NULL),
-           y = lbl("lbl_time_y", "Kumulativní klíčivost (%)"),
-           fill = lbl("lbl_time_legend", "Datum"),
-           title = lbl("lbl_time_title", "Postup klíčivosti dle varianty"),
-           subtitle = lbl("lbl_time_subtitle", sub_default)) +
+      labs(
+        x = lbl("lbl_time_x", NULL),
+        y = lbl("lbl_time_y", "Kumulativní klíčivost (%)"),
+        fill = lbl("lbl_time_legend", "Datum"),
+        title = lbl("lbl_time_title", "Postup klíčivosti dle varianty"),
+        subtitle = lbl("lbl_time_subtitle", sub_default)
+      ) +
       theme_minimal(base_size = 14) +
-      theme(plot.title = element_text(face = "bold", size = 18),
-            plot.subtitle = element_text(colour = "grey50", size = 12),
-            axis.text.x = element_text(angle = 45, hjust = 1, size = 12, face = "bold"),
-            legend.position = "top",
-            panel.grid.major.x = element_blank())
+      theme(
+        plot.title = element_text(face = "bold", size = 18),
+        plot.subtitle = element_text(colour = "grey50", size = 12),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 12, face = "bold"),
+        legend.position = "top",
+        panel.grid.major.x = element_blank()
+      )
   })
-
   output$heatmap_plot <- renderPlot({
     req(rv$full_data)
     dat <- rv$full_data; N <- input$N_seeds
