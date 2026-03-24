@@ -23,10 +23,15 @@ suppressPackageStartupMessages({
 # ── Helper ──────────────────────────────────────────────────────────────────
 read_upload <- function(path, name) {
   ext <- tolower(tools::file_ext(name))
-  if (ext %in% c("xls", "xlsx")) read_excel(path)
-  else if (ext == "csv") read_csv(path, show_col_types = FALSE)
-  else if (ext == "tsv") read_tsv(path, show_col_types = FALSE)
-  else read_csv(path, show_col_types = FALSE)
+  if (ext %in% c("xls", "xlsx")) {
+    read_excel(path)
+  } else if (ext == "csv") {
+    read_csv(path, show_col_types = FALSE)
+  } else if (ext == "tsv") {
+    read_tsv(path, show_col_types = FALSE)
+  } else {
+    read_csv(path, show_col_types = FALSE)
+  }
 }
 
 # ── UI ──────────────────────────────────────────────────────────────────────
@@ -61,6 +66,19 @@ ui <- page_navbar(
                   choices = c("sidak", "bonferroni", "tukey", "scheffe", "none")),
       numericInput("alpha", "Hladina testu", value = 0.05,
                    min = 0.001, max = 0.2, step = 0.01),
+      radioButtons(
+        "infer_scale",
+        "Škála pro contrasts a CLD",
+        choices = c(
+          "Model scale (doporučeno)" = "link",
+          "Response scale (experimentální)" = "response"
+        ),
+        selected = "link"
+      ),
+      p(class = "text-muted small",
+        "Model scale = statisticky standardní a nejlépe odpovídá inferenci modelu. ",
+        "Response scale = interpretačně přirozenější, ale experimentální a méně statisticky přesné. Contrasts i CLD se mohou lišit od standardního modelového pohledu."
+      ),
       selectInput("model_choice", "Volba modelu (interakce)",
                   choices = c("Automaticky (dle testu)" = "auto",
                               "Vždy s interakcí (varianta × čas)" = "M3",
@@ -104,8 +122,8 @@ ui <- page_navbar(
             "pot_id je vnitřní mechanismus, aby zpracování dat rozpoznalo, který květináč je který."),
           p(tags$strong("Monotónnost -"), " pokud celkový počet semenáčků z jednoho data na druhé klesne (mortalita), ",
             "jsou zde označena. Binomická data očekávají, že bude přírůst pouze kladný. Jinak by se musel dělat mnohem složitější",
-	    " multinomický model. Tady to tedy kompenzuji kvazibinomickým modelem, který alespoň trošku tuhle variabilitu navíc",
-	    " vyrovnává. Zatím jsou zde zapsány i negativní hodnoty, v části na přípravu dat se však nastaví na nulu.")
+            " multinomický model. Tady to tedy kompenzuji kvazibinomickým modelem, který alespoň trošku tuhle variabilitu navíc",
+            " vyrovnává. Zatím jsou zde zapsány i negativní hodnoty, v části na přípravu dat se však nastaví na nulu.")
         )
       ),
 
@@ -165,7 +183,7 @@ ui <- page_navbar(
         p(class = "text-muted",
           "Tři vnořené modely porovnány pomocí statistických testů. ",
           "Kvazibinomický model počítá s overdisperzí (dalo by se říct nepodchycenou složkou modelu) z mortality či podobných srand ",
-	  "(přidává do výpočtu parametr \u03C6, který zvýší SE - směrodatnou odchylku - násobně o \u221A\u03C6)."),
+          "(přidává do výpočtu parametr \u03C6, který zvýší SE - směrodatnou odchylku - násobně o \u221A\u03C6)."),
         actionButton("run_btn", "Spustit analýzu",
                      class = "btn-success btn-lg", style = "width:100%;")
       )
@@ -181,7 +199,7 @@ ui <- page_navbar(
     card(card_header("Predikované průměry — podmíněný model (emmeans)"),
          uiOutput("emm_info"),
          DTOutput("emm_table")),
-    card(card_header("Párová porovnání variant (post-hoc)"),
+    card(card_header("Kontrasty variant (rozdíly + adjustované CI)"),
          uiOutput("posthoc_info"),
          DTOutput("posthoc_table")),
     card(card_header("Statistické skupiny (CLD)",
@@ -205,7 +223,7 @@ ui <- page_navbar(
     uiOutput("cum_model_summary"),
     card(card_header("Kumulativní model — predikované průměry (emmeans)"),
          DTOutput("cum_emm_table")),
-    card(card_header("Kumulativní model — párová porovnání"),
+    card(card_header("Kumulativní model — kontrasty variant (rozdíly + adjustované CI)"),
          DTOutput("cum_posthoc_table")),
     card(card_header("Kumulativní model — statistické skupiny (CLD)"),
          DTOutput("cum_cld_table"))
@@ -229,7 +247,7 @@ ui <- page_navbar(
          verbatimTextOutput("final_ftest")),
     card(card_header("Predikované průměry (emmeans) a statistické skupiny (CLD)"),
          DTOutput("final_cld_table")),
-    card(card_header("Párová porovnání variant"),
+    card(card_header("Kontrasty variant (rozdíly + adjustované CI)"),
          DTOutput("final_posthoc_table"))
   ),
 
@@ -254,9 +272,19 @@ ui <- page_navbar(
       ),
       plotOutput("final_bar_plot", height = "550px")
     ),
+    card(full_screen = TRUE,
+        card_header("Jednoduchý test — matice signifikance kontrastů"),
+        p(class = "text-muted", "Zelená = bez průkazného rozdílu po korekci, červená = průkazný rozdíl."),
+        plotOutput("final_sig_heatmap", height = "650px")
+    ),
+    card(full_screen = TRUE,
+        card_header("Jednoduchý test — forest plot kontrastů"),
+        p(class = "text-muted", "Intervaly kontrastů po korekci; svislá čára v nule = žádný rozdíl."),
+        plotOutput("final_contrast_plot", height = "650px")
+    ),
     card(card_header("Predikované průměry a statistické skupiny (emmeans + CLD) — jednoduchý test"),
          DTOutput("final_emm_results")),
-    card(card_header("Párová porovnání — jednoduchý test"),
+    card(card_header("Kontrasty variant — jednoduchý test"),
          DTOutput("final_posthoc_results")),
 
     # ── Graf 2: Postup klíčivosti v čase + tabulky ──
@@ -276,13 +304,23 @@ ui <- page_navbar(
       ),
       plotOutput("timeline_plot", height = "550px")
     ),
+    card(full_screen = TRUE,
+        card_header("Kumulativní model — matice signifikance kontrastů"),
+        p(class = "text-muted", "Fasetová matice podle dat; zelená = bez rozdílu, červená = rozdíl."),
+        plotOutput("cum_sig_heatmap", height = "650px")
+    ),
+      card(full_screen = TRUE,
+        card_header("Kumulativní model — forest plot kontrastů"),
+        p(class = "text-muted", "Kontrasty mezi variantami v jednotlivých datech s adjustovanými intervaly."),
+        plotOutput("cum_contrast_plot", height = "650px")
+    ),
     card(card_header("Souhrnná kumulativní vzcházivost varianty (průměr přes časy, orientační)"),
          p(class = "text-muted small", "Jedna hodnota na variantu — průměr modelových odhadů přes data měření. ",
            "Sloupec n_times = přes kolik časů se průměrovalo."),
          DTOutput("cum_emm_results")),
     card(card_header("Statistické skupiny po jednotlivých datech (CLD, orientační)"),
          DTOutput("cum_cld_results")),
-    card(card_header("Párová porovnání — kumulativní model (orientační)"),
+    card(card_header("Kontrasty variant — kumulativní model (orientační)"),
          DTOutput("cum_posthoc_results")),
 
     # ── Graf 3: Podmíněná pravděpodobnost + tabulky ──
@@ -303,13 +341,23 @@ ui <- page_navbar(
       ),
       plotOutput("main_plot", height = "600px")
     ),
+    card(full_screen = TRUE,
+        card_header("Podmíněný model — matice signifikance kontrastů"),
+        p(class = "text-muted", "Fasetová matice podle dat; vychází přímo z adjustovaných párových kontrastů."),
+        plotOutput("cond_sig_heatmap", height = "650px")
+    ),
+      card(full_screen = TRUE,
+        card_header("Podmíněný model — forest plot kontrastů"),
+        p(class = "text-muted", "Kontrasty mezi variantami v jednotlivých datech s adjustovanými intervaly."),
+        plotOutput("cond_contrast_plot", height = "650px")
+    ),
     card(card_header("Souhrnný odhad varianty — podmíněný model (průměr přes časy)"),
          p(class = "text-muted small", "Jedna hodnota na variantu — průměr modelových odhadů přes data měření. ",
            "Sloupec n_times = přes kolik časů se průměrovalo (saturované varianty mohou mít méně)."),
          DTOutput("emm_results")),
     card(card_header("Statistické skupiny po jednotlivých datech (CLD) — podmíněný model"),
          DTOutput("cld_results")),
-    card(card_header("Párová porovnání — podmíněný model"),
+    card(card_header("Kontrasty variant — podmíněný model"),
          DTOutput("posthoc_results")),
 
     # ── Graf 4: Teplotní mapa ──
@@ -358,6 +406,196 @@ server <- function(input, output, session) {
     if (is.null(val) || trimws(val) == "") default else val
   }
 
+  standardize_interval_cols <- function(df) {
+    low_name <- grep("(^lower\\.CL$|LCL$)", names(df), value = TRUE)[1]
+    up_name  <- grep("(^upper\\.CL$|UCL$)", names(df), value = TRUE)[1]
+    if (!is.na(low_name) && nzchar(low_name) && low_name != "lower.CL") {
+      names(df)[names(df) == low_name] <- "lower.CL"
+    }
+    if (!is.na(up_name) && nzchar(up_name) && up_name != "upper.CL") {
+      names(df)[names(df) == up_name] <- "upper.CL"
+    }
+    df
+  }
+  
+  get_inference_emm <- function(emm_obj, scale = "link") {
+    if (identical(scale, "response")) {
+      regrid(emm_obj, transform = "response")
+    } else {
+      emm_obj
+    }
+  }
+
+  make_contrast_table <- function(emm_obj, adjust_method, conf_level, scale = "link") {
+    obj <- get_inference_emm(emm_obj, scale = scale)
+    pw <- pairs(obj, adjust = adjust_method)
+    out <- as.data.frame(summary(
+      pw,
+      infer = c(TRUE, TRUE),
+      level = conf_level,
+      adjust = adjust_method
+    ))
+    standardize_interval_cols(out)
+  }
+
+  make_cld_table <- function(emm_obj, adjust_method, alpha, scale = "link") {
+    obj <- get_inference_emm(emm_obj, scale = scale)
+    cld_res <- multcomp::cld(
+      obj,
+      adjust = adjust_method,
+      Letters = letters,
+      sort = FALSE,
+      alpha = alpha
+    )
+    out <- as.data.frame(cld_res)
+    if (".group" %in% names(out)) out$.group <- trimws(out$.group)
+    out
+  }
+
+  extract_contrast_pairs <- function(df) {
+    if (!"contrast" %in% names(df) || nrow(df) == 0) return(df)
+    pair_mat <- t(vapply(
+      as.character(df$contrast),
+      function(x) {
+        parts <- strsplit(x, " - ", fixed = TRUE)[[1]]
+        
+        part1 <- if (length(parts) >= 1) trimws(parts[1]) else NA_character_
+        part2 <- if (length(parts) >= 2) trimws(parts[2]) else NA_character_
+        c(part1, part2)
+      },
+      character(2)
+    ))
+    df$treatment1 <- pair_mat[, 1]
+    df$treatment2 <- pair_mat[, 2]
+    df
+  }
+
+  contrast_heatmap_data <- function(df, treatment_order, alpha) {
+    if (is.null(df) || nrow(df) == 0 || !"p.value" %in% names(df)) return(NULL)
+    x <- extract_contrast_pairs(df)
+    if (!all(c("treatment1", "treatment2") %in% names(x))) return(NULL)
+
+    keep_cols <- intersect(c("time", "treatment1", "treatment2", "p.value"), names(x))
+    base <- x[, keep_cols, drop = FALSE]
+    base$status <- ifelse(base$p.value < alpha, "rozdíl", "bez rozdílu")
+
+    swap <- base
+    tmp <- swap$treatment1
+    swap$treatment1 <- swap$treatment2
+    swap$treatment2 <- tmp
+
+    if ("time" %in% names(base)) {
+      diag_df <- expand.grid(
+        treatment1 = treatment_order,
+        treatment2 = treatment_order,
+        time = unique(as.character(base$time)),
+        stringsAsFactors = FALSE
+      )
+    } else {
+      diag_df <- expand.grid(
+        treatment1 = treatment_order,
+        treatment2 = treatment_order,
+        stringsAsFactors = FALSE
+      )
+    }
+    diag_df$status <- ifelse(diag_df$treatment1 == diag_df$treatment2, "stejná varianta", NA_character_)
+
+    out <- bind_rows(base, swap, diag_df) %>%
+      filter(!is.na(status)) %>%
+      distinct()
+
+    out$treatment1 <- factor(out$treatment1, levels = rev(treatment_order))
+    out$treatment2 <- factor(out$treatment2, levels = treatment_order)
+    out$status <- factor(out$status, levels = c("rozdíl", "bez rozdílu", "stejná varianta"))
+    if ("time" %in% names(out)) {
+      out$time <- factor(out$time, levels = unique(as.character(out$time)))
+    }
+    out
+  }
+
+  make_contrast_plot <- function(df, title_txt, subtitle_txt) {
+    req(df)
+    plot_df <- standardize_interval_cols(df)
+    validate(
+      need("contrast" %in% names(plot_df), "Chybí sloupec contrast."),
+      need("estimate" %in% names(plot_df), "Chybí sloupec estimate."),
+      need("lower.CL" %in% names(plot_df) && "upper.CL" %in% names(plot_df), "Chybí intervaly kontrastů.")
+    )
+
+    if ("p.value" %in% names(plot_df)) {
+      plot_df$sig <- ifelse(plot_df$p.value < input$alpha, "rozdíl", "bez rozdílu")
+    } else {
+      plot_df$sig <- "kontrast"
+    }
+    
+    plot_df$contrast <- factor(plot_df$contrast, levels = rev(unique(as.character(plot_df$contrast))))
+
+    x_lab <- if (identical(input$infer_scale, "response")) "Rozdíl odhadů (response scale)" else "Rozdíl odhadů (model scale)"
+
+    g <- ggplot(plot_df, aes(y = contrast, x = estimate, colour = sig)) +
+      geom_vline(xintercept = 0, linetype = 2, colour = "grey50") +
+      geom_segment(aes(x = lower.CL, xend = upper.CL, yend = contrast), linewidth = 0.8) +
+      geom_point(size = 2.4) +
+      scale_colour_manual(
+        values = c("rozdíl" = "#c0392b", "bez rozdílu" = "#1b7837", "kontrast" = "#2c3e50"),
+        name = NULL
+      ) +
+      labs(
+        x = x_lab,
+        y = NULL,
+        title = title_txt,
+        subtitle = subtitle_txt
+      ) +
+      theme_minimal(base_size = 13) +
+      theme(
+        legend.position = "top",
+        plot.title = element_text(face = "bold", size = 16),
+        plot.subtitle = element_text(colour = "grey45"),
+        panel.grid.major.y = element_blank()
+      )
+
+    if ("time" %in% names(plot_df)) {
+      g <- g + facet_wrap(~ time, scales = "free_y")
+    }
+    g
+  }
+
+  make_sig_heatmap_plot <- function(df, title_txt, subtitle_txt) {
+    heat_df <- contrast_heatmap_data(df, rv$treatment_order, input$alpha)
+    validate(need(!is.null(heat_df) && nrow(heat_df) > 0, "Není k dispozici matice signifikance."))
+
+    g <- ggplot(heat_df, aes(x = treatment2, y = treatment1, fill = status)) +
+      geom_tile(colour = "white", linewidth = 1) +
+      geom_text(aes(label = ifelse(status == "rozdíl", "×",
+                                   ifelse(status == "bez rozdílu", "ns", "—"))),
+                size = 4.8, fontface = "bold") +
+      scale_fill_manual(
+        values = c("rozdíl" = "#d73027", "bez rozdílu" = "#1a9850", "stejná varianta" = "#d9d9d9"),
+        name = NULL,
+        drop = FALSE
+      ) +
+      labs(
+        x = "Varianta 2",
+        y = "Varianta 1",
+        title = title_txt,
+        subtitle = subtitle_txt
+      ) +
+      theme_minimal(base_size = 13) +
+      theme(
+        legend.position = "top",
+        plot.title = element_text(face = "bold", size = 16),
+        plot.subtitle = element_text(colour = "grey45"),
+        panel.grid = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text.y = element_text(face = "bold")
+      )
+
+    if ("time" %in% names(heat_df)) {
+      g <- g + facet_wrap(~ time)
+    }
+    g
+  }
+
   rv <- reactiveValues(
     wide_data = NULL, transformed = FALSE, mono_issues = NULL,
     treatment_order = NULL,
@@ -367,7 +605,6 @@ server <- function(input, output, session) {
     best_model = NULL, posthoc = NULL, cld_df = NULL, emm_plot = NULL,
     final_M0 = NULL, final_M1 = NULL, final_ftest = NULL, final_cld = NULL, final_posthoc = NULL,
     cum_model = NULL, cum_emm = NULL, cum_posthoc = NULL, cum_cld = NULL,
-    # Marginální emmeans (průměr přes časy) pro tab Výsledky
     emm_marginal = NULL, cum_emm_marginal = NULL,
     aic_bic = NULL,
     log = ""
@@ -391,7 +628,6 @@ server <- function(input, output, session) {
     rv$aic_bic <- NULL
   }
 
-  # ── File upload ──
   uploaded <- reactiveVal(NULL)
 
   observeEvent(input$file, {
@@ -400,20 +636,15 @@ server <- function(input, output, session) {
     add_log("Loaded: ", input$file$name, " (", nrow(df), "\u00D7", ncol(df), ")")
     uploaded(df)
 
-    # Update column dropdowns
     cols <- names(df)
     updateSelectInput(session, "col_variant", choices = cols, selected = cols[1])
-    updateSelectInput(session, "col_date", choices = cols,
-                      selected = if (length(cols) >= 2) cols[2] else cols[1])
-    updateSelectInput(session, "col_count", choices = cols,
-                      selected = if (length(cols) >= 3) cols[3] else cols[1])
+    
+    sel_date <- if (length(cols) >= 2) cols[2] else cols[1]
+    updateSelectInput(session, "col_date", choices = cols, selected = sel_date)
+    
+    sel_count <- if (length(cols) >= 3) cols[3] else cols[1]
+    updateSelectInput(session, "col_count", choices = cols, selected = sel_count)
   })
-
-  # (column update now happens inside observeEvent above)
-
-  # ════════════════════════════════════════════════════════════
-  # TAB 1: Upload
-  # ════════════════════════════════════════════════════════════
 
   output$raw_table <- renderDT({
     req(uploaded())
@@ -431,10 +662,6 @@ server <- function(input, output, session) {
     )
   })
 
-  # ════════════════════════════════════════════════════════════
-  # TAB 2: Transform
-  # ════════════════════════════════════════════════════════════
-
   observeEvent(input$transform_btn, {
     req(uploaded(), input$col_variant, input$col_date, input$col_count)
     tryCatch({
@@ -450,7 +677,6 @@ server <- function(input, output, session) {
       long$time <- factor(long$time, levels = date_order)
       add_log("Data: ", paste(date_order, collapse = " \u2192 "))
 
-      # Zachovat pořadí variant podle prvního výskytu ve vstupních datech
       treat_order <- unique(long$treatment)
       long$treatment <- factor(long$treatment, levels = treat_order)
       add_log("Varianty: ", paste(treat_order, collapse = ", "))
@@ -465,7 +691,6 @@ server <- function(input, output, session) {
                     names_from = time, values_from = cumulative) %>%
         arrange(treatment, pot_id)
 
-      # Monotonicity check
       mono <- data.frame(treatment = character(), pot_id = integer(),
                          from_date = character(), to_date = character(),
                          from_val = numeric(), to_val = numeric(),
@@ -511,12 +736,14 @@ server <- function(input, output, session) {
     req(rv$transformed, rv$wide_data)
     wide <- rv$wide_data
     dcols <- setdiff(names(wide), c("treatment", "pot_id"))
+    
+    prob_txt <- if (nrow(rv$mono_issues) == 0) "\u2713 Žádné" else paste0("\u26A0 ", nrow(rv$mono_issues))
+
     card(class = "bg-light",
       p(tags$strong("Varianty: "), n_distinct(wide$treatment)),
       p(tags$strong("Nádoby: "), nrow(wide)),
       p(tags$strong("Data: "), paste(dcols, collapse = ", ")),
-      p(tags$strong("Problémy: "), if (nrow(rv$mono_issues) == 0) "\u2713 Žádné"
-        else paste0("\u26A0 ", nrow(rv$mono_issues)))
+      p(tags$strong("Problémy: "), prob_txt)
     )
   })
 
@@ -530,7 +757,7 @@ server <- function(input, output, session) {
       tables[[2]] <- card(card_header("Porušení monotónnosti"),
                           DTOutput("mono_table"))
     }
-    tables
+    tagList(tables)
   })
 
   output$wide_table <- renderDT({
@@ -542,10 +769,6 @@ server <- function(input, output, session) {
     req(rv$mono_issues, nrow(rv$mono_issues) > 0)
     datatable(rv$mono_issues, options = list(scrollX = TRUE), rownames = FALSE)
   })
-
-  # ════════════════════════════════════════════════════════════
-  # TAB 3: Data Prep
-  # ════════════════════════════════════════════════════════════
 
   observeEvent(input$convert_btn, {
     if (!rv$transformed) {
@@ -570,10 +793,8 @@ server <- function(input, output, session) {
       n_neg <- sum(long$new_germ < 0, na.rm = TRUE)
       if (n_neg > 0) add_log("Oseknutí na nulu ", n_neg, " záporných přírůstků")
 
-      long <- long %>%
-        mutate(new_germ = pmax(0, new_germ))
+      long <- long %>% mutate(new_germ = pmax(0, new_germ))
 
-      # Vyřadit časové body kde u VŠECH nádob kumulativní počet = 0
       if (isTRUE(input$drop_zero_times)) {
         zero_times <- long %>%
           group_by(time) %>%
@@ -582,7 +803,6 @@ server <- function(input, output, session) {
           pull(time)
         if (length(zero_times) > 0) {
           long <- long %>% filter(!time %in% zero_times)
-          # Přepočítat cum_prev po vyřazení — první zbývající timepoint musí mít cum_prev = 0
           long <- long %>%
             mutate(time = droplevels(time)) %>%
             arrange(treatment, pot_id, time) %>%
@@ -596,17 +816,13 @@ server <- function(input, output, session) {
         }
       }
 
-      # Uložit kompletní data PŘED filtrací (pro kumulativní grafy)
       rv$full_data <- long
 
-      # Vyřadit pozorování kde remaining <= 0 (všechna semínka už vzešla) — jen pro model
       n_zero <- sum(long$remaining <= 0, na.rm = TRUE)
       if (n_zero > 0) add_log("Vyřazeno ", n_zero, " pozorování s remaining \u2264 0 pro model (všechna semínka vzešla)")
       long <- long %>% filter(remaining > 0)
 
-      # Omezit new_germ na maximum remaining
-      long <- long %>%
-        mutate(new_germ = pmin(new_germ, remaining))
+      long <- long %>% mutate(new_germ = pmin(new_germ, remaining))
 
       rv$inc_data <- long; rv$converted <- TRUE
       rv$M1 <- NULL; rv$M2 <- NULL; rv$M3 <- NULL
@@ -641,10 +857,8 @@ server <- function(input, output, session) {
   output$prep_tables_ui <- renderUI({
     req(rv$converted)
     tagList(
-      card(card_header("Data s přírůstky"),
-           DTOutput("inc_table")),
-      card(card_header("Trajektorie jednotlivých nádob"),
-           plotOutput("prep_plot", height = "380px"))
+      card(card_header("Data s přírůstky"), DTOutput("inc_table")),
+      card(card_header("Trajektorie jednotlivých nádob"), plotOutput("prep_plot", height = "380px"))
     )
   })
 
@@ -662,19 +876,13 @@ server <- function(input, output, session) {
     ggplot(dat, aes(x = time, y = cumulative / N, colour = treatment,
                     group = interaction(treatment, pot_id))) +
       geom_line(alpha = 0.25, linewidth = 0.5) +
-      stat_summary(aes(group = treatment), fun = mean,
-                   geom = "line", linewidth = 1.4) +
-      stat_summary(aes(group = treatment), fun = mean,
-                   geom = "point", size = 3) +
+      stat_summary(aes(group = treatment), fun = mean, geom = "line", linewidth = 1.4) +
+      stat_summary(aes(group = treatment), fun = mean, geom = "point", size = 3) +
       scale_y_continuous(labels = scales::percent_format(), limits = c(0, NA)) +
       labs(x = "Datum", y = "Kumulativní vzcházivost (%)", colour = "Varianta") +
       theme_minimal(base_size = 13) +
       theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom")
   })
-
-  # ════════════════════════════════════════════════════════════
-  # TAB 4: Models
-  # ════════════════════════════════════════════════════════════
 
   observeEvent(input$run_btn, {
     if (!rv$converted) {
@@ -688,18 +896,14 @@ server <- function(input, output, session) {
     add_log("Spouští se ", fam_name, " GLM...")
 
     tryCatch({
-      rv$M1 <- glm(cbind(new_germ, remaining - new_germ) ~ time,
-                    family = fam, data = dat)
-      rv$M2 <- glm(cbind(new_germ, remaining - new_germ) ~ treatment + time,
-                    family = fam, data = dat)
-      rv$M3 <- glm(cbind(new_germ, remaining - new_germ) ~ treatment * time,
-                    family = fam, data = dat)
+      rv$M1 <- glm(cbind(new_germ, remaining - new_germ) ~ time, family = fam, data = dat)
+      rv$M2 <- glm(cbind(new_germ, remaining - new_germ) ~ treatment + time, family = fam, data = dat)
+      rv$M3 <- glm(cbind(new_germ, remaining - new_germ) ~ treatment * time, family = fam, data = dat)
 
       add_log("M1 dev=", round(rv$M1$deviance, 1),
               "  M2 dev=", round(rv$M2$deviance, 1),
               "  M3 dev=", round(rv$M3$deviance, 1))
 
-      # ── AIC/BIC — přímo z modelů pokud binomický, jinak z binomických protějšků ──
       if (fam_name == "binomial") {
         rv$aic_bic <- data.frame(
           Model = c("M1 (~time)", "M2 (~treatment + time)", "M3 (~treatment * time)"),
@@ -708,12 +912,9 @@ server <- function(input, output, session) {
           stringsAsFactors = FALSE
         )
       } else {
-        B1 <- glm(cbind(new_germ, remaining - new_germ) ~ time,
-                  family = binomial, data = dat)
-        B2 <- glm(cbind(new_germ, remaining - new_germ) ~ treatment + time,
-                  family = binomial, data = dat)
-        B3 <- glm(cbind(new_germ, remaining - new_germ) ~ treatment * time,
-                  family = binomial, data = dat)
+        B1 <- glm(cbind(new_germ, remaining - new_germ) ~ time, family = binomial, data = dat)
+        B2 <- glm(cbind(new_germ, remaining - new_germ) ~ treatment + time, family = binomial, data = dat)
+        B3 <- glm(cbind(new_germ, remaining - new_germ) ~ treatment * time, family = binomial, data = dat)
         rv$aic_bic <- data.frame(
           Model = c("M1 (~time)", "M2 (~treatment + time)", "M3 (~treatment * time)"),
           AIC = c(AIC(B1), AIC(B2), AIC(B3)),
@@ -726,14 +927,12 @@ server <- function(input, output, session) {
       rv$lr12 <- anova(rv$M1, rv$M2, test = test_type)
       rv$lr23 <- anova(rv$M2, rv$M3, test = test_type)
 
-      # Správný sloupec pro p-hodnotu závisí na typu testu
       p_col <- if (test_type == "F") "Pr(>F)" else "Pr(>Chi)"
       p_treat <- rv$lr12[[p_col]][2]
       p_inter <- rv$lr23[[p_col]][2]
       add_log("Treatment: p=", format.pval(p_treat, 4),
               "  Interaction: p=", format.pval(p_inter, 4))
 
-      # ── Model selection: manual override or automatic ──
       alpha <- input$alpha
       choice <- input$model_choice
       if (choice == "M3") {
@@ -743,7 +942,6 @@ server <- function(input, output, session) {
         rv$best_model <- "M2"
         add_log("Model zvolen ručně: M2 (bez interakce)")
       } else {
-        # Automatic: F-test decides
         if (!is.na(p_inter) && p_inter < alpha) {
           rv$best_model <- "M3"
         } else {
@@ -753,86 +951,71 @@ server <- function(input, output, session) {
       }
 
       mod <- if (rv$best_model == "M3") rv$M3 else rv$M2
-
       conf_level <- 1 - input$alpha
 
       if (rv$best_model == "M3") {
-        emm <- emmeans(mod, pairwise ~ treatment | time,
-                       adjust = input$p_method, type = "response", level = conf_level)
-        rv$posthoc <- as.data.frame(emm$contrasts)
-        emm_main <- emmeans(mod, ~ treatment | time, type = "response", level = conf_level)
-        rv$emm_plot <- as.data.frame(emm_main)
+        emm_main <- emmeans(mod, ~ treatment | time)
+        rv$posthoc <- make_contrast_table(emm_main, input$p_method, conf_level, input$infer_scale)
+        rv$emm_plot <- as.data.frame(summary(emm_main, type = "response", level = conf_level))
       } else {
-        emm <- emmeans(mod, pairwise ~ treatment,
-                       adjust = input$p_method, type = "response", level = conf_level)
-        rv$posthoc <- as.data.frame(emm$contrasts)
-        emm_main <- emmeans(mod, ~ treatment, type = "response", level = conf_level)
-        emm_time <- emmeans(mod, ~ treatment + time, type = "response", level = conf_level)
-        rv$emm_plot <- as.data.frame(emm_time)
+        emm_main <- emmeans(mod, ~ treatment)
+        rv$posthoc <- make_contrast_table(emm_main, input$p_method, conf_level, input$infer_scale)
+        emm_time <- emmeans(mod, ~ treatment + time)
+        rv$emm_plot <- as.data.frame(summary(emm_time, type = "response", level = conf_level))
       }
-
-      # CLD: compute letter groupings
+      
       rv$cld_df <- NULL
       tryCatch({
         if (rv$best_model == "M3") {
-          emm_bt <- emmeans(mod, ~ treatment | time, type = "response", level = conf_level)
-          cld_res <- multcomp::cld(emm_bt, adjust = input$p_method, Letters = letters, sort = FALSE, alpha = input$alpha)
-          cld_out <- as.data.frame(cld_res)
-          cld_out$.group <- trimws(cld_out$.group)
-          rv$cld_df <- cld_out
-          add_log("\u2713 CLD computed for ", length(unique(cld_out$time)), " timepoints")
+          emm_cld <- emmeans(mod, ~ treatment | time)
+          rv$cld_df <- make_cld_table(emm_cld, input$p_method, input$alpha, input$infer_scale)
+          add_log("\u2713 CLD computed for ", length(unique(rv$cld_df$time)),
+                  " timepoints on ", input$infer_scale, " scale")
         } else {
-          cld_res <- multcomp::cld(emm_main, adjust = input$p_method, Letters = letters, sort = FALSE, alpha = input$alpha)
-          cld_out <- as.data.frame(cld_res)
-          cld_out$.group <- trimws(cld_out$.group)
-          rv$cld_df <- cld_out
-          add_log("\u2713 CLD computed")
+          emm_cld <- emmeans(mod, ~ treatment)
+          rv$cld_df <- make_cld_table(emm_cld, input$p_method, input$alpha, input$infer_scale)
+          add_log("\u2713 CLD computed on ", input$infer_scale, " scale")
         }
       }, error = function(e) {
         add_log("\u26A0 CLD error: ", conditionMessage(e))
         tryCatch({
           if (rv$best_model == "M3") {
-            emm_bt <- emmeans(mod, ~ treatment | time, type = "response", level = conf_level)
-            cld_res <- multcomp::cld(emm_bt, adjust = input$p_method, Letters = letters, alpha = input$alpha)
+            emm_cld <- emmeans(mod, ~ treatment | time)
+            obj <- get_inference_emm(emm_cld, input$infer_scale)
+            cld_res <- multcomp::cld(obj, adjust = input$p_method, Letters = letters, alpha = input$alpha)
             cld_out <- as.data.frame(cld_res)
             if (".group" %in% names(cld_out)) cld_out$.group <- trimws(cld_out$.group)
             rv$cld_df <- cld_out
-            add_log("\u2713 CLD computed (fallback)")
           } else {
-            cld_res <- multcomp::cld(emm_main, adjust = input$p_method, Letters = letters, alpha = input$alpha)
+            emm_cld <- emmeans(mod, ~ treatment)
+            obj <- get_inference_emm(emm_cld, input$infer_scale)
+            cld_res <- multcomp::cld(obj, adjust = input$p_method, Letters = letters, alpha = input$alpha)
             cld_out <- as.data.frame(cld_res)
             if (".group" %in% names(cld_out)) cld_out$.group <- trimws(cld_out$.group)
             rv$cld_df <- cld_out
-            add_log("\u2713 CLD computed (fallback)")
           }
+          add_log("\u2713 CLD computed (fallback) on ", input$infer_scale, " scale")
         }, error = function(e2) {
           add_log("\u26A0 CLD fallback also failed: ", conditionMessage(e2))
         })
       })
-
       add_log("\u2713 Temporal analysis complete")
 
-      # ── Marginální odhad (průměr přes časy) pro podmíněný model ──
-      # Počítáme ručně z per-timepoint emmeans, ne přes emmeans(~ treatment),
-      # protože saturované varianty (remaining=0) nemají data v některých časech
-      # a emmeans by je vynechalo nebo vrátilo NA.
       tryCatch({
-        df_emm <- rv$emm_plot  # per treatment (× time)
+        df_emm <- rv$emm_plot
         if ("time" %in% names(df_emm)) {
-          # M3: průměr prob přes časy kde varianta má odhad
           rv$emm_marginal <- df_emm %>%
             filter(!is.na(prob)) %>%
             group_by(treatment) %>%
             summarise(
               prob = mean(prob),
-              SE = sqrt(mean(SE^2)),  # aproximace: RMS chyb
+              SE = sqrt(mean(SE^2)),
               asymp.LCL = mean(asymp.LCL),
               asymp.UCL = mean(asymp.UCL),
               n_times = n(),
               .groups = "drop"
             )
         } else {
-          # M2: emmeans vrací přímo per treatment, žádná marginalizace není potřeba
           rv$emm_marginal <- df_emm
         }
         add_log("\u2713 Marginální odhad (podmíněný model) computed")
@@ -841,44 +1024,27 @@ server <- function(input, output, session) {
         rv$emm_marginal <- NULL
       })
 
-      # ── Final Germination: simple GLM on last date only ──
       add_log("Running final germination test...")
       tryCatch({
-        # Get last timepoint data — z KOMPLETNÍCH dat (ne filtrovaných)
         full <- rv$full_data
         last_time <- levels(full$time)[length(levels(full$time))]
         final_dat <- full[full$time == last_time, ]
         final_dat$treatment <- factor(final_dat$treatment, levels = rv$treatment_order)
         N <- input$N_seeds
 
-        # M0: constant model (no treatment effect)
-        rv$final_M0 <- glm(cbind(cumulative, N - cumulative) ~ 1,
-                           family = fam, data = final_dat)
-        # M1: treatment effect
-        rv$final_M1 <- glm(cbind(cumulative, N - cumulative) ~ treatment,
-                           family = fam, data = final_dat)
+        rv$final_M0 <- glm(cbind(cumulative, N - cumulative) ~ 1, family = fam, data = final_dat)
+        rv$final_M1 <- glm(cbind(cumulative, N - cumulative) ~ treatment, family = fam, data = final_dat)
 
         rv$final_ftest <- anova(rv$final_M0, rv$final_M1, test = test_type)
         p_col_final <- if (test_type == "F") "Pr(>F)" else "Pr(>Chi)"
         p_final <- rv$final_ftest[[p_col_final]][2]
         add_log("Final germination ", test_type, "-test: p = ", format.pval(p_final, 4))
 
-        # CLD and post-hoc for final germination
         tryCatch({
-          emm_final <- emmeans(rv$final_M1, ~ treatment, type = "response", level = conf_level)
-          
-          # Párová porovnání
-          emm_pairs <- emmeans(rv$final_M1, pairwise ~ treatment,
-                               adjust = input$p_method, type = "response", level = conf_level)
-          rv$final_posthoc <- as.data.frame(emm_pairs$contrasts)
-          
-          # CLD
-          cld_final <- multcomp::cld(emm_final, adjust = input$p_method,
-                                      Letters = letters, sort = FALSE, alpha = input$alpha)
-          cld_final_df <- as.data.frame(cld_final)
-          cld_final_df$.group <- trimws(cld_final_df$.group)
-          rv$final_cld <- cld_final_df
-          add_log("\u2713 Final CLD + post-hoc computed")
+          emm_final <- emmeans(rv$final_M1, ~ treatment)
+          rv$final_posthoc <- make_contrast_table(emm_final, input$p_method, conf_level, input$infer_scale)
+          rv$final_cld <- make_cld_table(emm_final, input$p_method, input$alpha, input$infer_scale)
+          add_log("\u2713 Final CLD + post-hoc computed on ", input$infer_scale, " scale")
         }, error = function(e) {
           add_log("\u26A0 Final CLD/post-hoc failed: ", conditionMessage(e))
           rv$final_cld <- NULL
@@ -890,40 +1056,28 @@ server <- function(input, output, session) {
         add_log("\u26A0 Final germination error: ", conditionMessage(e))
       })
 
-      # ── Orientační kumulativní model ──
       add_log("Orientační kumulativní model...")
       tryCatch({
         full <- rv$full_data
         full$treatment <- factor(full$treatment, levels = rv$treatment_order)
         N <- input$N_seeds
 
-        rv$cum_model <- glm(cbind(cumulative, N - cumulative) ~ treatment * time,
-                            family = fam, data = full)
+        rv$cum_model <- glm(cbind(cumulative, N - cumulative) ~ treatment * time, family = fam, data = full)
 
-        cum_emm <- emmeans(rv$cum_model, ~ treatment | time, type = "response", level = conf_level)
-        rv$cum_emm <- as.data.frame(cum_emm)
-
-        cum_pairs <- emmeans(rv$cum_model, pairwise ~ treatment | time,
-                             adjust = input$p_method, type = "response", level = conf_level)
-        rv$cum_posthoc <- as.data.frame(cum_pairs$contrasts)
+        cum_emm <- emmeans(rv$cum_model, ~ treatment | time)
+        rv$cum_emm <- as.data.frame(summary(cum_emm, type = "response", level = conf_level))
+        rv$cum_posthoc <- make_contrast_table(cum_emm, input$p_method, conf_level, input$infer_scale)
 
         tryCatch({
-          cum_cld_res <- multcomp::cld(cum_emm, adjust = input$p_method,
-                                        Letters = letters, sort = FALSE, alpha = input$alpha)
-          cum_cld_df <- as.data.frame(cum_cld_res)
-          cum_cld_df$.group <- trimws(cum_cld_df$.group)
-          rv$cum_cld <- cum_cld_df
-          add_log("\u2713 Kumulativní model: emmeans + CLD + post-hoc hotovo")
+          rv$cum_cld <- make_cld_table(cum_emm, input$p_method, input$alpha, input$infer_scale)
+          add_log("\u2713 Kumulativní model: emmeans + CLD + post-hoc hotovo na ", input$infer_scale, " scale")
         }, error = function(e) {
           add_log("\u26A0 Kumulativní CLD selhalo: ", conditionMessage(e))
           rv$cum_cld <- NULL
         })
 
-        # Marginální odhad (průměr přes časy) pro kumulativní model
-        # Kumulativní model má vždy data pro všechny treatment×time (full_data se nefiltruje),
-        # ale pro konzistenci počítáme stejným způsobem jako u podmíněného modelu.
         tryCatch({
-          df_cum <- rv$cum_emm  # per treatment × time
+          df_cum <- rv$cum_emm
           rv$cum_emm_marginal <- df_cum %>%
             filter(!is.na(prob)) %>%
             group_by(treatment) %>%
@@ -976,7 +1130,6 @@ server <- function(input, output, session) {
   output$aic_bic_table <- renderDT({
     req(rv$aic_bic)
     df <- rv$aic_bic
-    # Mark best model
     df$AIC_best <- ifelse(df$AIC == min(df$AIC), "\u2713", "")
     df$BIC_best <- ifelse(df$BIC == min(df$BIC), "\u2713", "")
     datatable(df, options = list(dom = "t", ordering = FALSE), rownames = FALSE) %>%
@@ -990,32 +1143,33 @@ server <- function(input, output, session) {
     bic_best <- rv$aic_bic$Model[which.min(rv$aic_bic$BIC)]
 
     manual <- choice %in% c("M2", "M3")
-    label <- if (rv$best_model == "M3") "M3 (s interakcí)" else "M2 (bez interakce)"
+    
+    label_txt <- if (rv$best_model == "M3") "M3 (s interakcí)" else "M2 (bez interakce)"
+    div_class <- if (manual) "alert alert-warning" else "alert alert-info"
+    manual_txt <- if (manual) " (ruční volba)" else " (automaticky dle testu)"
+    manual_span <- if (manual) tags$span(class = "text-muted", " — Ruční volba přepisuje automatický výběr.") else NULL
 
-    div(class = if (manual) "alert alert-warning" else "alert alert-info",
-      tags$strong("Zvolený model: "), label,
-      if (manual) " (ruční volba)" else " (automaticky dle testu)",
+    div(class = div_class,
+      tags$strong("Zvolený model: "), label_txt, manual_txt,
       tags$br(),
       tags$small(
         sprintf("AIC preferuje: %s | BIC preferuje: %s", aic_best, bic_best),
-        if (manual) tags$span(class = "text-muted",
-          " — Ruční volba přepisuje automatický výběr.")
+        manual_span
       )
     )
   })
 
-  # Plain-language F-test summary (shared helper)
   make_ftest_summary <- function(show_simple = FALSE) {
     req(rv$lr12, rv$lr23, rv$best_model)
     alpha <- input$alpha
 
-    # Extrahovat p-hodnotu — robustně najít sloupec s p-hodnotou
     get_p <- function(aov_table, row = 2) {
       p_cols <- grep("^Pr\\(", names(aov_table), value = TRUE)
       if (length(p_cols) == 0) return(NA_real_)
       val <- aov_table[[p_cols[1]]][row]
       if (is.null(val)) NA_real_ else val
     }
+    
     p_treat <- get_p(rv$lr12)
     p_inter <- get_p(rv$lr23)
 
@@ -1024,7 +1178,6 @@ server <- function(input, output, session) {
     manual <- input$model_choice %in% c("M2", "M3")
     using_m3 <- rv$best_model == "M3"
 
-    # AIC/BIC summary line
     aic_line <- NULL
     if (!is.null(rv$aic_bic)) {
       aic_best <- rv$aic_bic$Model[which.min(rv$aic_bic$AIC)]
@@ -1033,21 +1186,37 @@ server <- function(input, output, session) {
         sprintf("AIC preferuje %s, BIC preferuje %s.", aic_best, bic_best))
     }
 
-    # Simple test result (only on results tab)
     simple_line <- NULL
     if (show_simple && !is.null(rv$final_ftest)) {
       p_final <- get_p(rv$final_ftest)
       final_sig <- !is.na(p_final) && p_final < alpha
+      
+      final_span <- if (final_sig) {
+        tags$span(style = "color: #d32f2f;", sprintf("\u2714 Varianty se liší v celkové vzcházivosti (p = %s)", format.pval(p_final, digits = 3)))
+      } else {
+        tags$span(style = "color: #666;", sprintf("\u2718 Nebyl detekován rozdíl v celkové vzcházivosti (p = %s)", format.pval(p_final, digits = 3)))
+      }
+      
       simple_line <- tags$p(
         tags$strong("4. Jednoduchý test (jen poslední datum): "),
-        if (final_sig)
-          tags$span(style = "color: #d32f2f;",
-            sprintf("\u2714 Varianty se liší v celkové vzcházivosti (p = %s)", format.pval(p_final, digits = 3)))
-        else
-          tags$span(style = "color: #666;",
-            sprintf("\u2718 Nebyl detekován rozdíl v celkové vzcházivosti (p = %s)", format.pval(p_final, digits = 3)))
+        final_span
       )
     }
+
+    treat_span <- if (treat_sig) {
+      tags$span(style = "color: #d32f2f;", sprintf("\u2714 ANO (p = %s)", format.pval(p_treat, digits = 3)))
+    } else {
+      tags$span(style = "color: #666;", sprintf("\u2718 Statisticky nevýznamný rozdíl (p = %s)", format.pval(p_treat, digits = 3)))
+    }
+    
+    inter_span <- if (inter_sig) {
+      tags$span(style = "color: #d32f2f;", sprintf("\u2714 ANO (p = %s)", format.pval(p_inter, digits = 3)))
+    } else {
+      tags$span(style = "color: #666;", sprintf("\u2718 Ne — efekt konzistentní napříč daty (p = %s)", format.pval(p_inter, digits = 3)))
+    }
+    
+    model_txt <- if (using_m3) "M3 (s interakcí) — varianty porovnány v každém čase zvlášť." else "M2 (bez interakce) — varianty porovnány celkově."
+    manual_span <- if (manual) tags$span(style = "color: #e65100;", " (ruční volba)") else NULL
 
     card(
       card_header("Shrnutí výsledků"),
@@ -1056,44 +1225,28 @@ server <- function(input, output, session) {
                style = "margin-bottom: 2px; color: #555;"),
         tags$p(
           tags$strong("1. Existuje jednotný efekt varianty v průběhu klíčení? "),
-          if (treat_sig)
-            tags$span(style = "color: #d32f2f;",
-              sprintf("\u2714 ANO (p = %s)", format.pval(p_treat, digits = 3)))
-          else
-            tags$span(style = "color: #666;",
-              sprintf("\u2718 Statisticky nevýznamný rozdíl (p = %s)", format.pval(p_treat, digits = 3))),
+          treat_span,
           tags$br(),
           tags$small(class = "text-muted",
-            "Testuje, zda mají jednotlivé varianty jednotný efekt v čase - při silném výsledku interakce může vyjít nevýznamné, i když celkově varianta 
-	    data silně ovlivňuje.")
+            "Testuje, zda mají jednotlivé varianty jednotný efekt v čase - při silném výsledku interakce může vyjít nevýznamné, i když celkově varianta data silně ovlivňuje.")
         ),
         tags$p(
           tags$strong("2. Mění se efekt variant v čase? "),
-          if (inter_sig)
-            tags$span(style = "color: #d32f2f;",
-              sprintf("\u2714 ANO (p = %s)", format.pval(p_inter, digits = 3)))
-          else
-            tags$span(style = "color: #666;",
-              sprintf("\u2718 Ne — efekt konzistentní napříč daty (p = %s)", format.pval(p_inter, digits = 3))),
+          inter_span,
           tags$br(),
           tags$small(class = "text-muted",
-            "Testuje, zda se rozdíly mezi variantami mění v různých datech (např. jedna začne brzy, jiná pozdě). Celkově tedy interakce čas:varianta. Vyjde-li
-	    interakce jako významná, hůře se interpretuje test předchozí.")
+            "Testuje, zda se rozdíly mezi variantami mění v různých datech (např. jedna začne brzy, jiná pozdě). Celkově tedy interakce čas:varianta. Vyjde-li interakce jako významná, hůře se interpretuje test předchozí.")
         ),
         tags$p(
           tags$strong("3. Použitý model: "),
-          if (using_m3) "M3 (s interakcí) — varianty porovnány v každém čase zvlášť."
-          else "M2 (bez interakce) — varianty porovnány celkově.",
-          if (manual) tags$span(style = "color: #e65100;", " (ruční volba)")
+          model_txt,
+          manual_span
         ),
         aic_line,
-        if (show_simple) tags$hr(style = "margin: 8px 0;"),
-        if (show_simple) tags$p(tags$strong("Jednoduchý test"), " — ignoruje čas, kouká jen na konečný výsledek:",
-               style = "margin-bottom: 2px; color: #555;"),
+        if (show_simple) tags$hr(style = "margin: 8px 0;") else NULL,
+        if (show_simple) tags$p(tags$strong("Jednoduchý test"), " — ignoruje čas, kouká jen na konečný výsledek:", style = "margin-bottom: 2px; color: #555;") else NULL,
         simple_line,
-        if (show_simple && !is.null(simple_line)) tags$small(class = "text-muted",
-          "Testuje, zda se varianty liší v celkovém počtu vzešlých semenáčků na konci experimentu. ",
-          "Může se lišit od časového modelu — varianty mohou klíčit různě rychle, ale skončit na podobném výsledku.")
+        if (show_simple && !is.null(simple_line)) tags$small(class = "text-muted", "Testuje, zda se varianty liší v celkovém počtu vzešlých semenáčků na konci experimentu. Může se lišit od časového modelu — varianty mohou klíčit různě rychle, ale skončit na podobném výsledku.") else NULL
       )
     )
   }
@@ -1114,13 +1267,14 @@ server <- function(input, output, session) {
     phi <- mod$deviance / mod$df.residual
     is_quasi <- input$family_choice == "quasibinomial"
 
+    div_class <- if (is_quasi) "alert alert-warning" else "alert alert-danger"
+    warn_span <- if (!is_quasi) tags$span(" — Binomický model ignoruje tuto overdisperzi! P-hodnoty mohou být příliš optimistické. Je k dispozici kvazibinomický model.") else tags$span(" — Kvazibinomický model toto zohledňuje v SE a p-hodnotách.")
+
     if (phi > 1.5) {
-      div(class = if (is_quasi) "alert alert-warning" else "alert alert-danger",
+      div(class = div_class,
         tags$strong("Overdisperze: "),
         sprintf("\u03C6 = %.2f (SE nafouklé \u00D7%.2f)", phi, sqrt(phi)),
-        if (!is_quasi) tags$span(
-          " — Binomický model ignoruje tuto overdisperzi! P-hodnoty mohou být příliš optimistické. Je k dispozici kvazibinomický model.")
-        else tags$span(" — Kvazibinomický model toto zohledňuje v SE a p-hodnotách.")
+        warn_span
       )
     } else if (phi < 0.5) {
       div(class = "alert alert-info",
@@ -1131,16 +1285,13 @@ server <- function(input, output, session) {
     }
   })
 
-  # ════════════════════════════════════════════════════════════
-  # TAB 5: Post-hoc
-  # ════════════════════════════════════════════════════════════
-
   output$emm_info <- renderUI({
     req(rv$best_model)
-    txt <- if (rv$best_model == "M3")
+    txt <- if (rv$best_model == "M3") {
       "Odhady podmíněné pravděpodobnosti klíčení pro každou variantu v každém datu (model s interakcí)."
-    else
+    } else {
       "Odhady podmíněné pravděpodobnosti klíčení pro každou variantu (průměr přes data, model bez interakce)."
+    }
     div(class = "alert alert-light", tags$small(txt))
   })
 
@@ -1153,13 +1304,26 @@ server <- function(input, output, session) {
 
   output$posthoc_info <- renderUI({
     req(rv$best_model)
-    txt <- if (rv$best_model == "M3")
-      "Interakce mezi datem a variantou byla uznána za důležitou"
-    else
-      "Interakce nezohledněna, varianta je porovnávána celkově jako průměr přes data"
-    div(class = "alert alert-info",
-        tags$strong("Přístup: "), txt,
-        paste0(" (s uvažovanou kompenzí testů metodou ", input$p_method, ")"))
+    txt <- if (rv$best_model == "M3") {
+      "Interakce mezi datem a variantou byla uznána za důležitou; tabulka níže ukazuje kontrasty mezi variantami v každém datu."
+    } else {
+      "Interakce nezohledněna; tabulka níže ukazuje celkové kontrasty mezi variantami."
+    }
+    
+    infer_txt <- if (input$infer_scale == "link") {
+      "Inference běží na model scale (doporučeno)."
+    } else {
+      "Inference běží na response scale (experimentální)."
+    }
+
+    tagList(
+      div(class = "alert alert-info",
+          tags$strong("Přístup: "), txt,
+          paste0(" (s uvažovanou kompenzí testů metodou ", input$p_method, ").")
+      ),
+      tags$br(),
+      tags$small(infer_txt)
+    )
   })
 
   output$posthoc_table <- renderDT({
@@ -1176,21 +1340,19 @@ server <- function(input, output, session) {
       formatRound(columns = nums, digits = 4)
   })
 
-  # ════════════════════════════════════════════════════════════
-  # Orientační kumulativní model — renderery
-  # ════════════════════════════════════════════════════════════
-
   output$cum_model_summary <- renderUI({
     req(rv$cum_model)
     phi <- rv$cum_model$deviance / rv$cum_model$df.residual
     is_quasi <- input$family_choice == "quasibinomial"
+    
+    se_txt <- if (is_quasi) sprintf(", SE inflace = \u00D7%.2f", sqrt(phi)) else ""
+
     div(class = "alert alert-secondary",
       tags$strong("Kumulativní model (orientační): "),
       sprintf("treatment * time, \u03C6 = %.2f", phi),
-      if (is_quasi) sprintf(", SE inflace = \u00D7%.2f", sqrt(phi)) else "",
+      se_txt,
       tags$br(),
-      tags$small(class = "text-muted",
-        "Pozorování z téhož květináče jsou korelovaná — výsledky jsou pouze orientační.")
+      tags$small(class = "text-muted", "Pozorování z téhož květináče jsou korelovaná — výsledky jsou pouze orientační.")
     )
   })
 
@@ -1215,10 +1377,6 @@ server <- function(input, output, session) {
       formatRound(columns = nums, digits = 4)
   })
 
-  # ════════════════════════════════════════════════════════════
-  # TAB 5b: Final Germination
-  # ════════════════════════════════════════════════════════════
-
   output$final_summary <- renderUI({
     req(rv$final_ftest)
     alpha <- input$alpha
@@ -1229,24 +1387,26 @@ server <- function(input, output, session) {
     is_quasi <- input$family_choice == "quasibinomial"
     test_label <- if (is_quasi) "F-test" else "LR test"
 
+    sig_span <- if (sig) {
+      tags$span(style = "color: #d32f2f;", sprintf("\u2714 ANO (%s p = %s)", test_label, format.pval(p_val, digits = 3)))
+    } else {
+      tags$span(style = "color: #666;", sprintf("\u2718 Nebyl detekován rozdíl (%s p = %s)", test_label, format.pval(p_val, digits = 3)))
+    }
+    
+    disp_p <- if (is_quasi) {
+      tags$p(style = "font-size: 0.9rem; color: #666;", sprintf("Disperze \u03C6 = %.2f, SE inflace = \u00D7%.2f", phi, sqrt(phi)))
+    } else {
+      tags$p(style = "font-size: 0.9rem; color: #666;", sprintf("Binomický model (bez korekce na overdisperzi). Disperze \u03C6 = %.2f", phi))
+    }
+
     card(
       card_header("Celková vzcházivost bez časového rozložení"),
       tags$div(style = "font-size: 1.1rem; line-height: 2;",
         tags$p(
           tags$strong("Liší se varianty v celkové vzcházivosti? "),
-          if (sig)
-            tags$span(style = "color: #d32f2f;",
-              sprintf("\u2714 ANO (%s p = %s)", test_label, format.pval(p_val, digits = 3)))
-          else
-            tags$span(style = "color: #666;",
-              sprintf("\u2718 Nebyl detekován rozdíl (%s p = %s)", test_label, format.pval(p_val, digits = 3)))
+          sig_span
         ),
-        if (is_quasi)
-          tags$p(style = "font-size: 0.9rem; color: #666;",
-            sprintf("Disperze \u03C6 = %.2f, SE inflace = \u00D7%.2f", phi, sqrt(phi)))
-        else
-          tags$p(style = "font-size: 0.9rem; color: #666;",
-            sprintf("Binomický model (bez korekce na overdisperzi). Disperze \u03C6 = %.2f", phi))
+        disp_p
       )
     )
   })
@@ -1256,13 +1416,14 @@ server <- function(input, output, session) {
     phi <- rv$final_M1$deviance / rv$final_M1$df.residual
     is_quasi <- input$family_choice == "quasibinomial"
 
+    div_class <- if (is_quasi) "alert alert-warning" else "alert alert-danger"
+    warn_span <- if (!is_quasi) tags$span(" — Binomický model ignoruje tuto overdisperzi! P-hodnoty mohou být příliš optimistické. Je k dispozici kvazibinomický model.") else tags$span(" — Kvazibinomický model toto zohledňuje v SE a p-hodnotách.")
+
     if (phi > 1.5) {
-      div(class = if (is_quasi) "alert alert-warning" else "alert alert-danger",
+      div(class = div_class,
         tags$strong("Overdisperze: "),
         sprintf("\u03C6 = %.2f (SE nafouklé \u00D7%.2f)", phi, sqrt(phi)),
-        if (!is_quasi) tags$span(
-          " — Binomický model ignoruje tuto overdisperzi! P-hodnoty mohou být příliš optimistické. Je k dispozici kvazibinomický model.")
-        else tags$span(" — Kvazibinomický model toto zohledňuje v SE a p-hodnotách.")
+        warn_span
       )
     } else if (phi < 0.5) {
       div(class = "alert alert-info",
@@ -1305,7 +1466,6 @@ server <- function(input, output, session) {
     cld_df <- rv$final_cld
     ci_pct <- round((1 - input$alpha) * 100)
 
-    # Modelové odhady a CI přímo z emmeans (rv$final_cld)
     plot_data <- data.frame(
       treatment = cld_df$treatment,
       mean_pct = cld_df$prob * 100,
@@ -1320,12 +1480,9 @@ server <- function(input, output, session) {
 
     ggplot(plot_data, aes(x = treatment, y = mean_pct, fill = treatment)) +
       geom_col(alpha = 0.85, width = 0.7) +
-      geom_errorbar(aes(ymin = ci_lo, ymax = ci_hi),
-                    width = 0.25, linewidth = 0.8) +
-      geom_text(aes(label = letter, y = ci_hi + 2),
-                size = 5, fontface = "bold", vjust = 0) +
-      geom_text(aes(label = sprintf("%.1f%%", mean_pct)),
-                vjust = -0.5, size = 3.5, colour = "grey30") +
+      geom_errorbar(aes(ymin = ci_lo, ymax = ci_hi), width = 0.25, linewidth = 0.8) +
+      geom_text(aes(label = letter, y = ci_hi + 2), size = 5, fontface = "bold", vjust = 0) +
+      geom_text(aes(label = sprintf("%.1f%%", mean_pct)), vjust = -0.5, size = 3.5, colour = "grey30") +
       scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.15))) +
       labs(x = lbl("lbl_bar_x", NULL),
            y = lbl("lbl_bar_y", "Vzcházivost (%)"),
@@ -1339,16 +1496,10 @@ server <- function(input, output, session) {
             panel.grid.major.x = element_blank())
   })
 
-  # ════════════════════════════════════════════════════════════
-  # TAB 6: Plots (model-based)
-  # ════════════════════════════════════════════════════════════
-
-  # emmeans conditional probability: treatments on x, faceted by time
   output$main_plot <- renderPlot({
     req(rv$emm_plot); df <- rv$emm_plot
     ci_pct <- round((1 - input$alpha) * 100)
 
-    # Zachovat pořadí variant ze vstupního souboru
     df$treatment <- factor(df$treatment, levels = rv$treatment_order)
 
     if (!"time" %in% names(df)) {
@@ -1387,7 +1538,6 @@ server <- function(input, output, session) {
     }
   })
 
-  # Timeline: treatments on x, colored by date, grouped bars with SE
   output$timeline_plot <- renderPlot({
     req(rv$full_data)
     ci_pct <- round((1 - input$alpha) * 100)
@@ -1438,7 +1588,6 @@ server <- function(input, output, session) {
             panel.grid.major.x = element_blank())
   })
 
-  # Heatmap: treatments × dates
   output$heatmap_plot <- renderPlot({
     req(rv$full_data)
     dat <- rv$full_data; N <- input$N_seeds
@@ -1469,11 +1618,36 @@ server <- function(input, output, session) {
             legend.position = "right")
   })
 
-  # ════════════════════════════════════════════════════════════
-  # Duplikáty tabulek pro tab Výsledky a grafy
-  # ════════════════════════════════════════════════════════════
+  output$final_sig_heatmap <- renderPlot({
+    req(rv$final_posthoc)
+    make_sig_heatmap_plot(rv$final_posthoc, "Jednoduchý test — matice signifikance", sprintf("Kontrasty po korekci %s; alpha = %.3f", input$p_method, input$alpha))
+  })
 
-  # Jednoduchý test — emmeans + CLD v jedné tabulce (jen jedno datum, není co marginalizovat)
+  output$final_contrast_plot <- renderPlot({
+    req(rv$final_posthoc)
+    make_contrast_plot(rv$final_posthoc, "Jednoduchý test — forest plot kontrastů", sprintf("Adjustované %d%% intervaly kontrastů", round((1 - input$alpha) * 100)))
+  })
+
+  output$cum_sig_heatmap <- renderPlot({
+    req(rv$cum_posthoc)
+    make_sig_heatmap_plot(rv$cum_posthoc, "Kumulativní model — matice signifikance", sprintf("Po datech; kontrasty po korekci %s", input$p_method))
+  })
+
+  output$cum_contrast_plot <- renderPlot({
+    req(rv$cum_posthoc)
+    make_contrast_plot(rv$cum_posthoc, "Kumulativní model — forest plot kontrastů", sprintf("Po datech; adjustované %d%% intervaly kontrastů", round((1 - input$alpha) * 100)))
+  })
+
+  output$cond_sig_heatmap <- renderPlot({
+    req(rv$posthoc)
+    make_sig_heatmap_plot(rv$posthoc, "Podmíněný model — matice signifikance", sprintf("Kontrasty po korekci %s", input$p_method))
+  })
+
+  output$cond_contrast_plot <- renderPlot({
+    req(rv$posthoc)
+    make_contrast_plot(rv$posthoc, "Podmíněný model — forest plot kontrastů", sprintf("Adjustované %d%% intervaly kontrastů", round((1 - input$alpha) * 100)))
+  })
+
   output$final_emm_results <- renderDT({
     req(rv$final_cld)
     df <- rv$final_cld; nums <- names(df)[sapply(df, is.numeric)]
@@ -1488,7 +1662,6 @@ server <- function(input, output, session) {
       formatRound(columns = nums, digits = 4)
   })
 
-  # Kumulativní model — emmeans = marginální průměr přes časy
   output$cum_emm_results <- renderDT({
     req(rv$cum_emm_marginal)
     df <- rv$cum_emm_marginal; nums <- names(df)[sapply(df, is.numeric)]
@@ -1496,7 +1669,6 @@ server <- function(input, output, session) {
       formatRound(columns = nums, digits = 4)
   })
 
-  # Kumulativní model — CLD = skupiny po jednotlivých datech
   output$cum_cld_results <- renderDT({
     req(rv$cum_cld)
     df <- rv$cum_cld; nums <- names(df)[sapply(df, is.numeric)]
@@ -1511,7 +1683,6 @@ server <- function(input, output, session) {
       formatRound(columns = nums, digits = 4)
   })
 
-  # Podmíněný model — emmeans = marginální průměr přes časy
   output$emm_results <- renderDT({
     req(rv$emm_marginal)
     df <- rv$emm_marginal; nums <- names(df)[sapply(df, is.numeric)]
@@ -1532,10 +1703,6 @@ server <- function(input, output, session) {
     datatable(df, options = list(pageLength = 30, scrollX = TRUE), rownames = FALSE) %>%
       formatRound(columns = nums, digits = 4)
   })
-
-  # ════════════════════════════════════════════════════════════
-  # TAB 8: Diagnostics (technical)
-  # ════════════════════════════════════════════════════════════
 
   output$diag_plot <- renderPlot({
     req(rv$best_model)
@@ -1564,10 +1731,6 @@ server <- function(input, output, session) {
       else cat("\u2713 Disperze blízká 1. Binomický model je přiměřený.\n")
     }
   })
-
-  # ════════════════════════════════════════════════════════════
-  # TAB 8: Log
-  # ════════════════════════════════════════════════════════════
 
   output$log_text <- renderPrint({ cat(rv$log) })
 }
